@@ -4,7 +4,6 @@ Average Treatment Effect (ATE) estimation methods.
 """
 
 import logging
-from typing import Dict, Optional, Tuple
 
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
@@ -42,7 +41,7 @@ def estimate_ate_ipw(
     Y: np.ndarray,
     T: np.ndarray,
     propensity_scores: np.ndarray,
-    weights: Optional[np.ndarray] = None,
+    weights: np.ndarray | None = None,
 ) -> float:
     """
     Inverse Propensity Weighting (IPW) ATE estimate.
@@ -80,9 +79,9 @@ def estimate_ate_aipw(
     Y: np.ndarray,
     T: np.ndarray,
     propensity_scores: np.ndarray,
-    outcome_models: Optional[Tuple] = None,
+    outcome_models: tuple | None = None,
     model_type: str = "linear",
-) -> Tuple[float, Tuple]:
+) -> tuple[float, tuple]:
     """
     Augmented Inverse Propensity Weighting (AIPW) ATE estimate.
 
@@ -106,7 +105,7 @@ def estimate_ate_aipw(
     Returns:
         Tuple of (ATE estimate, (model_treated, model_control))
     """
-    n = len(Y)
+    len(Y)
 
     # Fit outcome models if not provided
     if outcome_models is None:
@@ -165,7 +164,7 @@ def bootstrap_ate_ci(
     confidence_level: float = 0.95,
     random_state: int = 42,
     **ate_kwargs,
-) -> Tuple[float, float, float]:
+) -> tuple[float, float, float]:
     """
     Bootstrap confidence interval for ATE estimate.
 
@@ -251,8 +250,8 @@ def estimate_all_ate_methods(
     Y: np.ndarray,
     T: np.ndarray,
     propensity_scores: np.ndarray,
-    config: Dict,
-) -> Dict[str, Dict[str, float]]:
+    config: dict,
+) -> dict[str, dict[str, float]]:
     """
     Estimate ATE using all methods and compute confidence intervals.
 
@@ -298,7 +297,7 @@ def estimate_all_ate_methods(
     logger.info("\n[2/4] Inverse Propensity Weighting (IPW)...")
     from .propensity import compute_ipw_weights
 
-    ipw_weights = compute_ipw_weights(
+    compute_ipw_weights(
         T,
         propensity_scores,
         stabilize=ate_config.get("ipw_stabilize", True),

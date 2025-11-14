@@ -4,7 +4,6 @@ Feature engineering for causal impact analysis.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -26,8 +25,8 @@ class FeatureEngineer:
 
     def __init__(
         self,
-        categorical_features: Optional[List[str]] = None,
-        continuous_features: Optional[List[str]] = None,
+        categorical_features: list[str] | None = None,
+        continuous_features: list[str] | None = None,
         scale_features: bool = True,
     ):
         """
@@ -42,9 +41,9 @@ class FeatureEngineer:
         self.continuous_features = continuous_features or []
         self.scale_features = scale_features
 
-        self.scaler: Optional[StandardScaler] = None
-        self.encoder: Optional[OneHotEncoder] = None
-        self.feature_names_out_: Optional[List[str]] = None
+        self.scaler: StandardScaler | None = None
+        self.encoder: OneHotEncoder | None = None
+        self.feature_names_out_: list[str] | None = None
 
     def fit(self, df: pd.DataFrame) -> "FeatureEngineer":
         """
@@ -142,7 +141,7 @@ class FeatureEngineer:
 
         self.feature_names_out_ = feature_names
 
-    def get_feature_names(self) -> List[str]:
+    def get_feature_names(self) -> list[str]:
         """
         Get names of output features.
 
@@ -156,10 +155,10 @@ class FeatureEngineer:
 
 def prepare_features(
     df: pd.DataFrame,
-    feature_config: Dict,
+    feature_config: dict,
     fit: bool = True,
-    feature_engineer: Optional[FeatureEngineer] = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, FeatureEngineer]:
+    feature_engineer: FeatureEngineer | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, FeatureEngineer]:
     """
     Prepare features for causal estimation.
 
@@ -213,7 +212,7 @@ def prepare_features(
     return X, T, Y, feature_engineer
 
 
-def check_feature_leakage(df: pd.DataFrame, feature_names: List[str]) -> List[str]:
+def check_feature_leakage(df: pd.DataFrame, feature_names: list[str]) -> list[str]:
     """
     Check for potential data leakage in features.
 
@@ -248,7 +247,7 @@ def check_feature_leakage(df: pd.DataFrame, feature_names: List[str]) -> List[st
 
 def create_interaction_features(
     df: pd.DataFrame,
-    interaction_pairs: Optional[List[Tuple[str, str]]] = None,
+    interaction_pairs: list[tuple[str, str]] | None = None,
 ) -> pd.DataFrame:
     """
     Create interaction features for heterogeneity analysis.

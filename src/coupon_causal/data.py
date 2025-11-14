@@ -5,7 +5,6 @@ Data loading and generation for coupon causal impact analysis.
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -62,7 +61,7 @@ def generate_synthetic_coupon_data(
     true_ate: float = 15.0,
     confounding_strength: float = 2.0,
     random_state: int = 42,
-) -> Tuple[pd.DataFrame, Dict[str, float]]:
+) -> tuple[pd.DataFrame, dict[str, float]]:
     """
     Generate synthetic coupon campaign data with realistic confounding.
 
@@ -289,7 +288,7 @@ def create_train_test_split(
     df: pd.DataFrame,
     test_size: float = 0.2,
     random_state: int = 42,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Split data into train and test sets.
 
@@ -316,7 +315,7 @@ def create_train_test_split(
     return train_df, test_df
 
 
-def load_synth_coupon(config: Dict, output_path: Optional[str] = None) -> pd.DataFrame:
+def load_synth_coupon(config: dict, output_path: str | None = None) -> pd.DataFrame:
     """
     Generate and optionally save synthetic coupon data.
 

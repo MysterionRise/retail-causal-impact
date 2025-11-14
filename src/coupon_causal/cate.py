@@ -9,12 +9,9 @@ Implements multiple methods for estimating heterogeneous treatment effects:
 """
 
 import logging
-from typing import Dict, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import KFold
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +52,7 @@ class XLearner:
         X: np.ndarray,
         Y: np.ndarray,
         T: np.ndarray,
-        propensity_scores: Optional[np.ndarray] = None,
+        propensity_scores: np.ndarray | None = None,
     ) -> "XLearner":
         """
         Fit X-Learner.
@@ -121,7 +118,7 @@ class XLearner:
     def predict(
         self,
         X: np.ndarray,
-        propensity_scores: Optional[np.ndarray] = None,
+        propensity_scores: np.ndarray | None = None,
     ) -> np.ndarray:
         """
         Predict CATE.
@@ -150,8 +147,8 @@ def fit_dr_learner(
     X: np.ndarray,
     Y: np.ndarray,
     T: np.ndarray,
-    config: Dict,
-) -> Tuple[np.ndarray, object]:
+    config: dict,
+) -> tuple[np.ndarray, object]:
     """
     Fit EconML DRLearner for CATE estimation.
 
@@ -168,7 +165,7 @@ def fit_dr_learner(
     """
     try:
         from econml.dr import DRLearner
-        from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
+        from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
     except ImportError:
         logger.error("EconML not installed. Install with: pip install econml")
         raise
@@ -228,8 +225,8 @@ def fit_orthogonal_forest(
     X: np.ndarray,
     Y: np.ndarray,
     T: np.ndarray,
-    config: Dict,
-) -> Tuple[np.ndarray, object, np.ndarray]:
+    config: dict,
+) -> tuple[np.ndarray, object, np.ndarray]:
     """
     Fit EconML CausalForest (Orthogonal Random Forest) for CATE estimation.
 
@@ -244,7 +241,7 @@ def fit_orthogonal_forest(
     """
     try:
         from econml.dml import CausalForestDML
-        from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
+        from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
     except ImportError:
         logger.error("EconML not installed. Install with: pip install econml")
         raise
@@ -306,8 +303,8 @@ def fit_x_learner(
     Y: np.ndarray,
     T: np.ndarray,
     propensity_scores: np.ndarray,
-    config: Dict,
-) -> Tuple[np.ndarray, XLearner]:
+    config: dict,
+) -> tuple[np.ndarray, XLearner]:
     """
     Fit X-Learner for CATE estimation.
 
@@ -345,9 +342,9 @@ def estimate_all_cate_methods(
     Y: np.ndarray,
     T: np.ndarray,
     propensity_scores: np.ndarray,
-    config: Dict,
-    feature_names: Optional[list] = None,
-) -> Dict[str, Dict]:
+    config: dict,
+    feature_names: list | None = None,
+) -> dict[str, dict]:
     """
     Estimate CATE using all available methods.
 
@@ -436,7 +433,7 @@ def compute_cate_intervals(
     cate_model,
     X: np.ndarray,
     alpha: float = 0.05,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute confidence intervals for CATE predictions.
 

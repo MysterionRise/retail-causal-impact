@@ -7,7 +7,6 @@ before and after propensity score weighting.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -20,8 +19,8 @@ logger = logging.getLogger(__name__)
 def compute_balance_table(
     X: np.ndarray,
     T: np.ndarray,
-    feature_names: List[str],
-    weights: Optional[np.ndarray] = None,
+    feature_names: list[str],
+    weights: np.ndarray | None = None,
 ) -> pd.DataFrame:
     """
     Compute balance table with standardized mean differences.
@@ -79,9 +78,9 @@ def compute_balance_table(
 def compare_balance_before_after(
     X: np.ndarray,
     T: np.ndarray,
-    feature_names: List[str],
+    feature_names: list[str],
     weights: np.ndarray,
-) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float]]:
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
     """
     Compare covariate balance before and after weighting.
 
@@ -139,7 +138,7 @@ def compare_balance_before_after(
 def assess_balance_quality(
     balance_df: pd.DataFrame,
     smd_threshold: float = 0.1,
-) -> Dict[str, any]:
+) -> dict[str, any]:
     """
     Assess overall balance quality.
 
@@ -191,8 +190,8 @@ def assess_balance_quality(
 def compute_variance_ratio(
     X: np.ndarray,
     T: np.ndarray,
-    feature_names: List[str],
-    weights: Optional[np.ndarray] = None,
+    feature_names: list[str],
+    weights: np.ndarray | None = None,
 ) -> pd.DataFrame:
     """
     Compute variance ratios between treatment and control groups.
@@ -255,7 +254,7 @@ def check_positivity(
     T: np.ndarray,
     lower_threshold: float = 0.01,
     upper_threshold: float = 0.99,
-) -> Dict[str, any]:
+) -> dict[str, any]:
     """
     Check positivity assumption (overlap in propensity scores).
 

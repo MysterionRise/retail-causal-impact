@@ -4,7 +4,6 @@ Refutation and sensitivity analysis using DoWhy.
 """
 
 import logging
-from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -48,8 +47,8 @@ def run_dowhy_analysis(
     df: pd.DataFrame,
     treatment_col: str = "treatment",
     outcome_col: str = "outcome",
-    common_causes: Optional[List[str]] = None,
-) -> Dict:
+    common_causes: list[str] | None = None,
+) -> dict:
     """
     Run DoWhy causal analysis with refutations.
 
@@ -227,7 +226,7 @@ def placebo_outcome_test(
     T: np.ndarray,
     pre_treatment_outcome: np.ndarray,
     propensity_scores: np.ndarray,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Placebo test using pre-treatment outcome.
 
@@ -292,7 +291,7 @@ def leave_one_out_analysis(
     X: np.ndarray,
     Y: np.ndarray,
     T: np.ndarray,
-    feature_names: List[str],
+    feature_names: list[str],
     ate_baseline: float,
 ) -> pd.DataFrame:
     """
@@ -311,8 +310,8 @@ def leave_one_out_analysis(
     Returns:
         DataFrame with leave-one-out results
     """
-    from .propensity import PropensityModel, compute_ipw_weights
     from .ate import estimate_ate_ipw
+    from .propensity import PropensityModel, compute_ipw_weights
 
     logger.info("Running leave-one-out analysis...")
 
@@ -327,7 +326,7 @@ def leave_one_out_analysis(
         prop_model_loo.fit(X_loo, T)
 
         # Re-estimate ATE
-        weights_loo = compute_ipw_weights(T, prop_model_loo.propensity_scores_, stabilize=True)
+        compute_ipw_weights(T, prop_model_loo.propensity_scores_, stabilize=True)
         ate_loo = estimate_ate_ipw(Y, T, prop_model_loo.propensity_scores_)
 
         # Compute change
@@ -345,7 +344,7 @@ def leave_one_out_analysis(
 
     df_loo = pd.DataFrame(results).sort_values("pct_change", key=abs, ascending=False)
 
-    logger.info(f"\nFeatures with largest impact on ATE (top 5):")
+    logger.info("\nFeatures with largest impact on ATE (top 5):")
     logger.info(f"\n{df_loo.head().to_string(index=False)}")
 
     return df_loo

@@ -10,7 +10,6 @@ Implements:
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -23,7 +22,7 @@ def compute_qini_curve(
     T: np.ndarray,
     Y: np.ndarray,
     n_bins: int = 20,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute Qini curve for uplift evaluation.
 
@@ -136,7 +135,7 @@ def evaluate_policy_uplift(
     cate_scores: np.ndarray,
     T: np.ndarray,
     Y: np.ndarray,
-    budget_fractions: Optional[List[float]] = None,
+    budget_fractions: list[float] | None = None,
     cost_per_treatment: float = 1.0,
 ) -> pd.DataFrame:
     """
@@ -214,8 +213,8 @@ def compare_policies(
     cate_scores: np.ndarray,
     T: np.ndarray,
     Y: np.ndarray,
-    original_policy: Optional[np.ndarray] = None,
-) -> Dict[str, float]:
+    original_policy: np.ndarray | None = None,
+) -> dict[str, float]:
     """
     Compare learned targeting policy vs. baseline policies.
 
@@ -259,8 +258,8 @@ def compare_policies(
 def optimal_policy_threshold(
     cate_scores: np.ndarray,
     cost_per_treatment: float = 1.0,
-    treatment_capacity: Optional[int] = None,
-) -> Tuple[float, np.ndarray]:
+    treatment_capacity: int | None = None,
+) -> tuple[float, np.ndarray]:
     """
     Determine optimal policy threshold for treatment assignment.
 
@@ -344,7 +343,7 @@ def create_targeting_recommendations(
     cate_scores: np.ndarray,
     df: pd.DataFrame,
     threshold: float,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
 ) -> pd.DataFrame:
     """
     Create targeting recommendations for deployment.
@@ -382,7 +381,7 @@ def create_targeting_recommendations(
         df_recommendations.to_csv(output_path, index=False)
         logger.info(f"Targeting recommendations saved to {output_path}")
 
-    logger.info(f"\nTargeting recommendations summary:")
+    logger.info("\nTargeting recommendations summary:")
     logger.info(f"Total customers: {len(df_recommendations):,}")
     logger.info(
         f"Recommended for treatment: {df_recommendations['recommend_treatment'].sum():,} "

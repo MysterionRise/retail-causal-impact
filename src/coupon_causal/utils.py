@@ -6,14 +6,14 @@ Utility functions for causal impact analysis.
 import logging
 import random
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import joblib
 import numpy as np
 import yaml
 
 
-def setup_logging(level: str = "INFO", log_format: Optional[str] = None) -> logging.Logger:
+def setup_logging(level: str = "INFO", log_format: str | None = None) -> logging.Logger:
     """
     Setup logging configuration.
 
@@ -48,7 +48,7 @@ def set_random_seed(seed: int = 42) -> None:
     # Note: sklearn and other libraries will use np.random
 
 
-def load_config(config_path: str) -> Dict[str, Any]:
+def load_config(config_path: str) -> dict[str, Any]:
     """
     Load YAML configuration file.
 
@@ -62,7 +62,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with open(config_file, "r") as f:
+    with open(config_file) as f:
         config = yaml.safe_load(f)
 
     return config
@@ -83,7 +83,7 @@ def ensure_dir(path: str) -> Path:
     return dir_path
 
 
-def save_artifact(obj: Any, path: str, logger: Optional[logging.Logger] = None) -> None:
+def save_artifact(obj: Any, path: str, logger: logging.Logger | None = None) -> None:
     """
     Save Python object to disk using joblib.
 
@@ -98,7 +98,7 @@ def save_artifact(obj: Any, path: str, logger: Optional[logging.Logger] = None) 
         logger.info(f"Saved artifact to {path}")
 
 
-def load_artifact(path: str, logger: Optional[logging.Logger] = None) -> Any:
+def load_artifact(path: str, logger: logging.Logger | None = None) -> Any:
     """
     Load Python object from disk using joblib.
 
@@ -122,8 +122,8 @@ def load_artifact(path: str, logger: Optional[logging.Logger] = None) -> Any:
 def compute_standardized_mean_difference(
     x_treated: np.ndarray,
     x_control: np.ndarray,
-    weights_treated: Optional[np.ndarray] = None,
-    weights_control: Optional[np.ndarray] = None,
+    weights_treated: np.ndarray | None = None,
+    weights_control: np.ndarray | None = None,
 ) -> float:
     """
     Compute standardized mean difference (SMD) for a single feature.
@@ -167,7 +167,7 @@ def bootstrap_ci(
     statistic_fn,
     n_iterations: int = 1000,
     confidence_level: float = 0.95,
-    random_state: Optional[int] = None,
+    random_state: int | None = None,
     **statistic_kwargs,
 ) -> tuple[float, float, float]:
     """

@@ -4,14 +4,12 @@ Propensity score modeling and diagnostics for causal inference.
 """
 
 import logging
-from typing import Dict, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 from sklearn.calibration import calibration_curve
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.model_selection import cross_val_predict
 
 logger = logging.getLogger(__name__)
@@ -31,8 +29,8 @@ class PropensityModel:
     def __init__(
         self,
         model_type: str = "logistic",
-        clip_bounds: Tuple[float, float] = (0.01, 0.99),
-        config: Optional[Dict] = None,
+        clip_bounds: tuple[float, float] = (0.01, 0.99),
+        config: dict | None = None,
     ):
         """
         Initialize propensity model.
@@ -136,7 +134,7 @@ class PropensityModel:
 
     def compute_diagnostics(
         self, T: np.ndarray, n_bins: int = 10
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Compute propensity model diagnostics.
 
@@ -187,7 +185,7 @@ def compute_ipw_weights(
     T: np.ndarray,
     propensity_scores: np.ndarray,
     stabilize: bool = True,
-    trim_percentiles: Optional[Tuple[float, float]] = None,
+    trim_percentiles: tuple[float, float] | None = None,
 ) -> np.ndarray:
     """
     Compute inverse propensity weights (IPW).
@@ -239,8 +237,8 @@ def compute_ipw_weights(
 def fit_propensity_models(
     X: np.ndarray,
     T: np.ndarray,
-    config: Dict,
-) -> Tuple[PropensityModel, PropensityModel, np.ndarray]:
+    config: dict,
+) -> tuple[PropensityModel, PropensityModel, np.ndarray]:
     """
     Fit multiple propensity models and return ensemble.
 
@@ -289,7 +287,7 @@ def assess_overlap(
     propensity_scores: np.ndarray,
     T: np.ndarray,
     threshold: float = 0.1,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Assess overlap in propensity score distributions.
 

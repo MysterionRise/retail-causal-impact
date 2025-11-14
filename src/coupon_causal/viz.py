@@ -4,8 +4,6 @@ Visualization utilities for causal impact analysis.
 """
 
 import logging
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,7 +21,7 @@ plt.rcParams["figure.dpi"] = 100
 def plot_treatment_distribution(
     T: np.ndarray,
     Y: np.ndarray,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """
     Plot treatment distribution and outcome by treatment group.
@@ -72,7 +70,7 @@ def plot_treatment_distribution(
 def plot_propensity_distribution(
     propensity_scores: np.ndarray,
     T: np.ndarray,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """
     Plot propensity score distributions for treated and control groups.
@@ -142,7 +140,7 @@ def plot_love_plot(
     balance_after: pd.DataFrame,
     top_k: int = 15,
     smd_threshold: float = 0.1,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """
     Create Love plot showing balance before and after weighting.
@@ -228,8 +226,8 @@ def plot_love_plot(
 
 
 def plot_ate_comparison(
-    ate_results: Dict[str, Dict[str, float]],
-    save_path: Optional[str] = None,
+    ate_results: dict[str, dict[str, float]],
+    save_path: str | None = None,
 ) -> Figure:
     """
     Plot comparison of ATE estimates from different methods.
@@ -299,7 +297,7 @@ def plot_ate_comparison(
 def plot_cate_distribution(
     cate_scores: np.ndarray,
     method_name: str = "CATE",
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """
     Plot CATE distribution.
@@ -361,7 +359,7 @@ def plot_qini_curve(
     fractions: np.ndarray,
     qini_values: np.ndarray,
     random_baseline: np.ndarray,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """
     Plot Qini curve for uplift evaluation.
@@ -423,9 +421,9 @@ def plot_qini_curve(
 
 def plot_feature_importance(
     feature_importances: np.ndarray,
-    feature_names: List[str],
+    feature_names: list[str],
     top_k: int = 15,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """
     Plot feature importance for CATE model.
@@ -469,7 +467,7 @@ def plot_segment_uplift(
     segment_stats: pd.DataFrame,
     segment_col: str = "segment",
     uplift_col: str = "avg_predicted_uplift",
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """
     Plot average uplift by customer segment.
@@ -524,7 +522,7 @@ def plot_calibration_curve(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     n_bins: int = 10,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """
     Plot calibration curve for propensity model.
