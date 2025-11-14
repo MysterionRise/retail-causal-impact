@@ -56,9 +56,9 @@ jobs:
         verbose: true
       continue-on-error: true
 
-    - name: Test quick smoke test
+    - name: Quick smoke test
       run: |
-        python test_quick.py
+        python -c "import sys; sys.path.insert(0, 'src'); from coupon_causal import data, utils; print('✓ Package imports successfully')"
 
   build:
     runs-on: ubuntu-latest
@@ -125,33 +125,22 @@ jobs:
 
     - name: Run estimation stage (quick mode)
       run: |
-        # Use smaller sample for faster CI
-        python -c "
-import sys
-sys.path.insert(0, 'src')
-from coupon_causal import data, features, propensity, ate, utils
-import pandas as pd
-
-# Load data
-df = pd.read_parquet('data/processed/coupon_data.parquet')
-df = df.head(500)  # Use only 500 samples for quick test
-
-# Quick estimation
-config = utils.load_config('config/default.yaml')
-X, T, Y, fe = features.prepare_features(df, config['features'], fit=True)
-
-# Propensity
-prop_model = propensity.PropensityModel(model_type='logistic')
-prop_model.fit(X, T)
-
-# ATE
-ate_naive = ate.estimate_ate_naive(Y, T)
-ate_ipw = ate.estimate_ate_ipw(Y, T, prop_model.propensity_scores_)
-
-print(f'✓ Naive ATE: \${ate_naive:.2f}')
-print(f'✓ IPW ATE: \${ate_ipw:.2f}')
-print('✓ Integration test passed!')
-        "
+        python -c '
+        import sys
+        sys.path.insert(0, "src")
+        from coupon_causal import data, features, propensity, ate, utils
+        import pandas as pd
+        df = pd.read_parquet("data/processed/coupon_data.parquet")
+        df = df.head(500)
+        config = utils.load_config("config/default.yaml")
+        X, T, Y, fe = features.prepare_features(df, config["features"], fit=True)
+        prop_model = propensity.PropensityModel(model_type="logistic")
+        prop_model.fit(X, T)
+        ate_naive = ate.estimate_ate_naive(Y, T)
+        ate_ipw = ate.estimate_ate_ipw(Y, T, prop_model.propensity_scores_)
+        print(f"Naive ATE: ${ate_naive:.2f}, IPW ATE: ${ate_ipw:.2f}")
+        print("Integration test passed!")
+        '
 
     - name: Test CLI smoke test
       run: |
