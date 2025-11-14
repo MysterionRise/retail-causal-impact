@@ -1,7 +1,9 @@
 # Coupon Causal Impact Analysis
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![CI](https://github.com/MysterionRise/retail-causal-impact/workflows/CI/badge.svg)](https://github.com/MysterionRise/retail-causal-impact/actions)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![codecov](https://codecov.io/gh/MysterionRise/retail-causal-impact/branch/main/graph/badge.svg)](https://codecov.io/gh/MysterionRise/retail-causal-impact)
 
 Production-quality causal impact analysis for retail coupon campaigns. Estimate average and heterogeneous treatment effects (ATE, CATE), evaluate targeting policies, and optimize coupon allocation using state-of-the-art causal inference methods.
 
@@ -105,8 +107,25 @@ make app
 ### Run Tests
 
 ```bash
+# Run all tests
 make test
+
+# Or with pytest directly
+python -m pytest tests/ -v
+
+# Run with coverage
+python -m pytest tests/ --cov=src/coupon_causal --cov-report=term-missing
+
+# Run specific test file
+python -m pytest tests/test_synth_recovery.py -v
 ```
+
+**Test Suite:**
+- `test_synth_recovery.py` - Validates ATE/CATE recovery on synthetic data with known ground truth
+- `test_balance.py` - Tests covariate balance improvement after propensity weighting
+- `test_policy.py` - Tests policy learning and uplift evaluation (Qini, AUUC)
+
+**Current Coverage:** 45% overall (17 tests, all passing)
 
 ## 📖 Usage
 

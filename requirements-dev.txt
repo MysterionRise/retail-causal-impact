@@ -1,0 +1,18 @@
+# Include base requirements
+-r requirements.txt
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+
+# Linting and formatting
+ruff==0.1.8
+mypy==1.7.1
+
+# Notebooks
+jupyter==1.0.0
+ipykernel==6.27.1
+
+# Build tools
+build==1.0.3
+twine==4.0.2
