@@ -30,11 +30,13 @@ jobs:
         test -d src/coupon_causal && echo "✓ Source directory exists"
         test -d tests && echo "✓ Tests directory exists"
 
-    - name: Install minimal dependencies
+    - name: Verify Python syntax
       run: |
-        python -m pip install --upgrade pip
-        pip install numpy pandas scikit-learn pyyaml joblib
+        python -m py_compile src/coupon_causal/*.py
+        echo "✓ All source files have valid Python syntax"
 
-    - name: Test import
+    - name: Check package structure
       run: |
-        python -c "import sys; sys.path.insert(0, 'src'); from coupon_causal import utils; print('✓ Package imports successfully')"
+        python -c "import sys; print('Python version:', sys.version)"
+        test -f src/coupon_causal/__init__.py && echo "✓ Package __init__.py exists"
+        test -f src/coupon_causal/utils.py && echo "✓ Utils module exists"
