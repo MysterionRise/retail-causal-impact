@@ -1,0 +1,108 @@
+# path: config/default.yaml
+# Causal Impact Analysis Configuration
+
+# Random seed for reproducibility
+random_state: 42
+
+# Data paths
+paths:
+  raw_data: "data/raw"
+  interim_data: "data/interim"
+  processed_data: "data/processed"
+  figures: "reports/figures"
+  tables: "reports/tables"
+  models: "models"
+
+# Data generation (synthetic)
+synthetic:
+  n_samples: 10000
+  treatment_rate: 0.3
+  noise_level: 0.1
+  true_ate: 15.0  # True average treatment effect in dollars
+  confounding_strength: 2.0
+
+# Feature engineering
+features:
+  categorical_features:
+    - "customer_segment"
+    - "region"
+    - "preferred_category"
+  continuous_features:
+    - "recency_days"
+    - "frequency_purchases"
+    - "monetary_value"
+    - "avg_basket_size"
+    - "loyalty_score"
+    - "price_sensitivity"
+    - "pre_trend"
+
+# Propensity modeling
+propensity:
+  clip_bounds: [0.01, 0.99]  # Bounds for propensity score clipping
+  trim_percentiles: [1, 99]   # Trim extreme weights at these percentiles
+  calibration_bins: 10
+  models:
+    logistic:
+      max_iter: 1000
+      C: 1.0
+    gbm:
+      n_estimators: 100
+      max_depth: 5
+      learning_rate: 0.1
+      min_samples_leaf: 50
+
+# ATE estimation
+ate:
+  bootstrap_iterations: 500
+  bootstrap_confidence_level: 0.95
+  ipw_stabilize: true
+
+# CATE estimation
+cate:
+  cross_fitting_folds: 5
+  dr_learner:
+    model_regression:
+      n_estimators: 100
+      max_depth: 6
+      min_samples_leaf: 20
+    model_propensity:
+      n_estimators: 100
+      max_depth: 4
+  orthogonal_forest:
+    n_trees: 500
+    min_leaf_size: 10
+    max_depth: 10
+    subsample_ratio: 0.7
+  x_learner:
+    n_estimators: 100
+    max_depth: 6
+
+# Policy evaluation
+policy:
+  budget_fractions: [0.1, 0.2, 0.3, 0.4, 0.5]
+  qini_bins: 20
+  min_samples_per_bin: 30
+
+# Balance diagnostics
+balance:
+  smd_threshold: 0.1  # Target standardized mean difference
+  plot_top_features: 15
+
+# Refutation / sensitivity
+refutation:
+  n_simulations: 100
+  placebo_methods:
+    - "random_common_cause"
+    - "placebo_treatment_refuter"
+
+# Visualization
+viz:
+  figure_format: "png"
+  figure_dpi: 300
+  style: "seaborn-v0_8-darkgrid"
+  color_palette: "Set2"
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
