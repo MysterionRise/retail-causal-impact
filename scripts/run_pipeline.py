@@ -341,13 +341,19 @@ def main():
 
     if args.stage in ["estimation", "all"]:
         results = run_estimation_stage(config, df)
-    else:
-        # Load existing results
+    elif args.stage == "report":
+        # Load existing results only if needed for report
         models_path = Path(config["paths"]["models"]) / "estimation_results.joblib"
         results = utils.load_artifact(str(models_path))
         logger.info(f"Loaded results from {models_path}")
+    else:
+        # No results needed for data-only stage
+        results = None
 
     if args.stage in ["report", "all"]:
+        if results is None:
+            logger.error("Results not available. Run estimation stage first.")
+            sys.exit(1)
         run_report_stage(config, df, results)
 
     logger.info("\n" + "=" * 80)
