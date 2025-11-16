@@ -203,18 +203,36 @@ def bootstrap_ate_ci(
         Y_boot = Y[idx]
         T_boot = T[idx]
 
-        # Re-fit propensity model if needed
-        boot_kwargs = ate_kwargs.copy()
-        if "propensity_scores" in ate_kwargs:
-            # For IPW/AIPW, refit propensity model on bootstrap sample
-            from .propensity import PropensityModel
-
-            prop_model = PropensityModel(model_type="logistic")
-            prop_model.fit(X_boot, T_boot)
-            boot_kwargs["propensity_scores"] = prop_model.propensity_scores_
-
         # Compute ATE on bootstrap sample
         try:
+            # Re-fit propensity model if needed
+            boot_kwargs = ate_kwargs.copy()
+            if "propensity_scores" in ate_kwargs:
+                # For IPW/AIPW, refit propensity model on bootstrap sample
+                from .propensity import PropensityModel
+
+                # Check if bootstrap sample has both treatment groups
+                if len(np.unique(T_boot)) < 2:
+                    logger.warning(f"Bootstrap iteration {i} failed: degenerate sample (only one treatment group)")
+                    continue
+
+                # Validate X_boot
+                if X_boot is None:
+                    logger.warning(f"Bootstrap iteration {i} failed: X_boot is None")
+                    continue
+
+                if not isinstance(X_boot, np.ndarray):
+                    logger.warning(f"Bootstrap iteration {i} failed: X_boot is not an array, got {type(X_boot)}")
+                    continue
+
+                if np.isnan(X_boot).any():
+                    logger.warning(f"Bootstrap iteration {i} failed: X_boot contains NaN values")
+                    continue
+
+                prop_model = PropensityModel(model_type="logistic")
+                prop_model.fit(X_boot, T_boot)
+                boot_kwargs["propensity_scores"] = prop_model.propensity_scores_
+
             if "X" in ate_fn.__code__.co_varnames:
                 ate_boot = ate_fn(X_boot, Y_boot, T_boot, **boot_kwargs)
                 if isinstance(ate_boot, tuple):
@@ -229,6 +247,16 @@ def bootstrap_ate_ci(
 
     bootstrap_estimates = np.array(bootstrap_estimates)
 
+    # Check if we have enough successful bootstrap iterations
+    min_successful_iterations = max(10, int(n_iterations * 0.1))  # At least 10 or 10% of iterations
+    if len(bootstrap_estimates) < min_successful_iterations:
+        logger.warning(
+            f"Only {len(bootstrap_estimates)}/{n_iterations} bootstrap iterations succeeded. "
+            f"Returning point estimate without CI."
+        )
+        # Return point estimate with NaN bounds to indicate failure
+        return point_estimate, np.nan, np.nan
+
     # Compute percentile CI
     alpha = 1 - confidence_level
     lower_percentile = 100 * (alpha / 2)
@@ -238,7 +266,7 @@ def bootstrap_ate_ci(
     upper_bound = np.percentile(bootstrap_estimates, upper_percentile)
 
     logger.info(
-        f"Bootstrap CI ({confidence_level:.0%}): "
+        f"Bootstrap CI ({confidence_level:.0%}) from {len(bootstrap_estimates)} iterations: "
         f"${point_estimate:.2f} [{lower_bound:.2f}, {upper_bound:.2f}]"
     )
 
@@ -306,7 +334,7 @@ def estimate_all_ate_methods(
 
     ate_ipw, ci_lower_ipw, ci_upper_ipw = bootstrap_ate_ci(
         estimate_ate_ipw,
-        None,
+        X,  # Pass X so propensity model can be refit in bootstrap
         Y,
         T,
         n_iterations=n_boot,
