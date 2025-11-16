@@ -156,9 +156,10 @@ def plot_love_plot(
         Matplotlib Figure
     """
     # Merge tables
+    # Note: balance_before and balance_after already have smd_before and smd_after columns
     balance_df = pd.merge(
-        balance_before[["feature", "smd"]].rename(columns={"smd": "smd_before"}),
-        balance_after[["feature", "smd"]].rename(columns={"smd": "smd_after"}),
+        balance_before[["feature", "smd_before"]],
+        balance_after[["feature", "smd_after"]],
         on="feature",
     )
 
