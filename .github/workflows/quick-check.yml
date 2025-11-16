@@ -1,0 +1,42 @@
+name: CI Status Check
+
+on:
+  push:
+    branches: [ main, master, claude/** ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  quick-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Quick validation
+      run: |
+        echo "✓ Repository checked out"
+        echo "✓ Python installed"
+        ls -la
+
+    - name: Check files exist
+      run: |
+        test -f pyproject.toml && echo "✓ pyproject.toml exists"
+        test -f README.md && echo "✓ README.md exists"
+        test -d src/coupon_causal && echo "✓ Source directory exists"
+        test -d tests && echo "✓ Tests directory exists"
+
+    - name: Verify Python syntax
+      run: |
+        python -m py_compile src/coupon_causal/*.py
+        echo "✓ All source files have valid Python syntax"
+
+    - name: Check package structure
+      run: |
+        python -c "import sys; print('Python version:', sys.version)"
+        test -f src/coupon_causal/__init__.py && echo "✓ Package __init__.py exists"
+        test -f src/coupon_causal/utils.py && echo "✓ Utils module exists"
