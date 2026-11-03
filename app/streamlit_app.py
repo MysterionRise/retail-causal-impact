@@ -8,13 +8,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from coupon_causal import data, features, policy, utils
+from coupon_causal import data, policy, utils
 
 # Page config
 st.set_page_config(
@@ -34,10 +33,15 @@ def load_data(data_source, config_path="config/default.yaml"):
     utils.set_random_seed(config["random_state"])
 
     if data_source == "Synthetic":
+        # Pass every generator parameter so the rows line up exactly with the
+        # data the pipeline scored (models/estimation_results.joblib).
+        synth = config["synthetic"]
         df, ground_truth = data.generate_synthetic_coupon_data(
-            n_samples=config["synthetic"]["n_samples"],
-            treatment_rate=config["synthetic"]["treatment_rate"],
-            true_ate=config["synthetic"]["true_ate"],
+            n_samples=synth["n_samples"],
+            treatment_rate=synth["treatment_rate"],
+            noise_level=synth.get("noise_level", 0.1),
+            true_ate=synth["true_ate"],
+            confounding_strength=synth.get("confounding_strength", 2.0),
             random_state=config["random_state"],
         )
         return df, config, ground_truth
@@ -46,7 +50,7 @@ def load_data(data_source, config_path="config/default.yaml"):
         try:
             df = pd.read_parquet("data/processed/coupon_data.parquet")
             return df, config, None
-        except:
+        except (FileNotFoundError, OSError):
             st.error("Public data not found. Please run the pipeline first or use Synthetic data.")
             return None, None, None
 
@@ -57,7 +61,7 @@ def load_results():
     try:
         results = utils.load_artifact("models/estimation_results.joblib")
         return results
-    except:
+    except FileNotFoundError:
         return None
 
 
@@ -112,7 +116,7 @@ with tab1:
             labels={"treatment": "Treatment Group", "count": "Count"},
             color_discrete_sequence=["steelblue"],
         )
-        st.plotly_chart(fig_treatment, use_container_width=True)
+        st.plotly_chart(fig_treatment, width="stretch")
 
     with col2:
         fig_outcome = px.histogram(
@@ -124,7 +128,7 @@ with tab1:
             barmode="overlay",
             opacity=0.7,
         )
-        st.plotly_chart(fig_outcome, use_container_width=True)
+        st.plotly_chart(fig_outcome, width="stretch")
 
 with tab2:
     st.header("Average Treatment Effect (ATE) Estimates")
@@ -149,7 +153,7 @@ with tab2:
             ]
         )
 
-        st.dataframe(ate_summary, use_container_width=True)
+        st.dataframe(ate_summary, width="stretch")
 
         # ATE comparison plot
         methods = [m.replace("_", " ").title() for m in ate_results.keys()]
@@ -169,7 +173,7 @@ with tab2:
                     type="data",
                     symmetric=False,
                     array=[u - e for e, u in zip(estimates, ci_upper)],
-                    arrayminus=[e - l for e, l in zip(estimates, ci_lower)],
+                    arrayminus=[e - lo for e, lo in zip(estimates, ci_lower)],
                 ),
                 name="ATE",
             )
@@ -184,7 +188,7 @@ with tab2:
             height=400,
         )
 
-        st.plotly_chart(fig_ate, use_container_width=True)
+        st.plotly_chart(fig_ate, width="stretch")
 
         if ground_truth is not None:
             st.success(f"✓ True ATE: ${ground_truth['true_ate']:.2f}")
@@ -217,7 +221,7 @@ with tab3:
             color_discrete_sequence=["steelblue"],
         )
         fig_cate.add_vline(x=cate_scores.mean(), line_dash="dash", line_color="red", annotation_text="Mean")
-        st.plotly_chart(fig_cate, use_container_width=True)
+        st.plotly_chart(fig_cate, width="stretch")
 
         # Qini curve
         st.subheader("Qini Curve - Uplift Gain")
@@ -258,7 +262,7 @@ with tab3:
             height=400,
         )
 
-        st.plotly_chart(fig_qini, use_container_width=True)
+        st.plotly_chart(fig_qini, width="stretch")
 
         # Policy recommendations
         st.subheader("Policy Recommendations")
@@ -300,7 +304,7 @@ with tab4:
     else:
         segment_stats = results["segment_stats"]
 
-        st.dataframe(segment_stats, use_container_width=True)
+        st.dataframe(segment_stats, width="stretch")
 
         # Segment uplift chart
         fig_segment = px.bar(
@@ -314,14 +318,14 @@ with tab4:
             color_continuous_scale="RdYlGn",
         )
 
-        st.plotly_chart(fig_segment, use_container_width=True)
+        st.plotly_chart(fig_segment, width="stretch")
 
 # Footer
 st.sidebar.markdown("---")
 st.sidebar.markdown("### About")
 st.sidebar.info(
     "This dashboard presents causal impact analysis for coupon campaigns using "
-    "doubly-robust methods (AIPW, DRLearner, Orthogonal Random Forest) and "
+    "doubly-robust methods (AIPW, DRLearner, Causal Forest) and "
     "policy learning via uplift modeling."
 )
 

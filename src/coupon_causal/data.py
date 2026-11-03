@@ -54,6 +54,35 @@ def load_coupon_public(file_path: str) -> pd.DataFrame:
     return df
 
 
+def _sigmoid(z: np.ndarray) -> np.ndarray:
+    """Numerically stable logistic function."""
+    return 1.0 / (1.0 + np.exp(-z))
+
+
+def _calibrate_intercept(
+    logit: np.ndarray, target_rate: float, tol: float = 1e-6, max_iter: int = 100
+) -> float:
+    """
+    Find the intercept ``c`` such that ``mean(sigmoid(logit + c)) == target_rate``.
+
+    The mean propensity is monotone increasing in ``c``, so a bisection search
+    converges quickly and deterministically.
+    """
+    if not 0.0 < target_rate < 1.0:
+        raise ValueError(f"target_rate must be in (0, 1), got {target_rate}")
+
+    lo, hi = -20.0, 20.0
+    for _ in range(max_iter):
+        mid = (lo + hi) / 2
+        if _sigmoid(logit + mid).mean() < target_rate:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo < tol:
+            break
+    return (lo + hi) / 2
+
+
 def generate_synthetic_coupon_data(
     n_samples: int = 10000,
     treatment_rate: float = 0.3,
@@ -67,16 +96,23 @@ def generate_synthetic_coupon_data(
 
     The data generation process:
     1. Generate customer features (loyalty, recency, frequency, etc.)
-    2. Create confounded treatment assignment via propensity score
-    3. Generate potential outcomes Y(0) and treatment effect τ(X)
-    4. Observe outcome Y = Y(0) + T * τ(X) + noise
+    2. Build a confounded propensity score p(X) that favours loyal, recent,
+       high-value customers (the way a real marketing team targets coupons)
+    3. Draw treatment T ~ Bernoulli(p(X)). Sampling (rather than thresholding)
+       is what gives every customer a non-zero chance of either arm, i.e. the
+       positivity/overlap assumption that IPW and AIPW rely on actually holds.
+    4. Generate potential outcomes Y(0) and treatment effect τ(X)
+    5. Observe outcome Y = Y(0) + T * τ(X) + noise
+
+    The intercept of the propensity logit is calibrated so that the realised
+    treatment rate matches ``treatment_rate`` in expectation.
 
     Args:
         n_samples: Number of customers to generate
         treatment_rate: Target proportion receiving treatment
-        noise_level: Standard deviation of outcome noise
-        true_ate: True average treatment effect (in dollars)
-        confounding_strength: Strength of confounding relationship
+        noise_level: Standard deviation of outcome noise, as a fraction of mean Y(0)
+        true_ate: Base treatment effect (in dollars) before heterogeneity terms
+        confounding_strength: Strength of the confounding relationship
         random_state: Random seed for reproducibility
 
     Returns:
@@ -84,15 +120,15 @@ def generate_synthetic_coupon_data(
         - DataFrame with features, treatment, and observed outcome
         - Dict with true ATE and CATE parameters for validation
     """
-    np.random.seed(random_state)
-    logger.info(f"Generating synthetic data: n={n_samples:,}, ATE={true_ate}")
+    rng = np.random.default_rng(random_state)
+    logger.info(f"Generating synthetic data: n={n_samples:,}, base effect={true_ate}")
 
     # Generate customer features
     # Continuous features
-    recency_days = np.random.exponential(scale=30, size=n_samples).clip(1, 365)
-    frequency_purchases = np.random.poisson(lam=12, size=n_samples).clip(1, 100)
-    monetary_value = np.random.gamma(shape=2, scale=50, size=n_samples).clip(10, 1000)
-    avg_basket_size = np.random.gamma(shape=3, scale=20, size=n_samples).clip(5, 200)
+    recency_days = rng.exponential(scale=30, size=n_samples).clip(1, 365)
+    frequency_purchases = rng.poisson(lam=12, size=n_samples).clip(1, 100)
+    monetary_value = rng.gamma(shape=2, scale=50, size=n_samples).clip(10, 1000)
+    avg_basket_size = rng.gamma(shape=3, scale=20, size=n_samples).clip(5, 200)
 
     # Loyalty score (0-100, derived feature)
     loyalty_score = (
@@ -100,29 +136,29 @@ def generate_synthetic_coupon_data(
         + 0.3 * (100 - recency_days / 3.65)  # Recency effect
         + 0.4 * np.minimum(frequency_purchases * 2, 40)  # Frequency effect
         + 0.3 * np.minimum(monetary_value / 10, 10)  # Monetary effect
-        + np.random.normal(0, 10, n_samples)  # Noise
+        + rng.normal(0, 10, n_samples)  # Noise
     ).clip(0, 100)
 
     # Price sensitivity (higher = more price-sensitive)
-    price_sensitivity = np.random.beta(a=2, b=5, size=n_samples) * 10
+    price_sensitivity = rng.beta(a=2, b=5, size=n_samples) * 10
 
     # Pre-campaign trend (spending growth rate)
-    pre_trend = np.random.normal(0, 5, n_samples)
+    pre_trend = rng.normal(0, 5, n_samples)
 
     # Categorical features
-    segments = np.random.choice(
+    segments = rng.choice(
         ["high_value", "mid_value", "low_value", "new_customer"],
         size=n_samples,
         p=[0.2, 0.35, 0.30, 0.15],
     )
 
-    regions = np.random.choice(
+    regions = rng.choice(
         ["north", "south", "east", "west"],
         size=n_samples,
         p=[0.25, 0.25, 0.25, 0.25],
     )
 
-    categories = np.random.choice(
+    categories = rng.choice(
         ["grocery", "electronics", "apparel", "home", "other"],
         size=n_samples,
         p=[0.3, 0.2, 0.2, 0.15, 0.15],
@@ -149,19 +185,20 @@ def generate_synthetic_coupon_data(
     # Propensity score depends on loyalty, recency, and segment
     # Companies tend to target loyal, recent, high-value customers
     logit_propensity = (
-        -1.0  # Baseline log-odds
-        + confounding_strength * (loyalty_score - 50) / 50  # Loyalty effect
+        confounding_strength * (loyalty_score - 50) / 50  # Loyalty effect
         - confounding_strength * 0.5 * (recency_days - 180) / 180  # Recency effect
         + confounding_strength * 0.3 * (frequency_purchases - 12) / 12  # Frequency
         + np.where(segments == "high_value", 1.0, 0.0)  # Target high-value
         - np.where(segments == "new_customer", 0.8, 0.0)  # Avoid new customers
     )
 
-    propensity_score = 1 / (1 + np.exp(-logit_propensity))
+    # Calibrate the intercept so that mean propensity == treatment_rate
+    intercept = _calibrate_intercept(logit_propensity, treatment_rate)
+    propensity_score = _sigmoid(logit_propensity + intercept)
 
-    # Adjust to match target treatment rate
-    treatment_threshold = np.percentile(propensity_score, (1 - treatment_rate) * 100)
-    treatment = (propensity_score >= treatment_threshold).astype(int)
+    # Draw treatment. Sampling from the propensity (not thresholding it) keeps
+    # overlap: loyal customers are *more likely* to get a coupon, not certain to.
+    treatment = rng.binomial(1, propensity_score).astype(int)
 
     # Store true propensity for validation
     df["true_propensity"] = propensity_score
@@ -189,14 +226,14 @@ def generate_synthetic_coupon_data(
         - 0.2 * (loyalty_score - 50) / 50 * 10  # Loyal customers respond less
         + np.where(segments == "low_value", 8, 0)  # Bigger lift for low-value
         + np.where(segments == "new_customer", 12, 0)  # Biggest lift for new
-        + np.random.normal(0, 3, n_samples)  # Individual variation
+        + rng.normal(0, 3, n_samples)  # Individual variation
     )
 
     # Observed outcome: Y = Y(0) + T * τ(X) + ε
     outcome = (
         base_spending
         + treatment * treatment_effect
-        + np.random.normal(0, noise_level * base_spending.mean(), n_samples)
+        + rng.normal(0, noise_level * base_spending.mean(), n_samples)
     )
 
     # Ensure non-negative spending

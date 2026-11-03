@@ -1,5 +1,9 @@
 # path: config/default.yaml
-# Causal Impact Analysis Configuration
+# Causal Impact Analysis Configuration — DEMO (fast) profile
+#
+# Tuned so that `make all` finishes in about a minute on a laptop while still
+# running every estimator. For the heavier settings (500 bootstrap draws,
+# larger forests, 5-fold cross-fitting) use config/full.yaml via `make full`.
 
 # Random seed for reproducibility
 random_state: 42
@@ -18,7 +22,7 @@ synthetic:
   n_samples: 10000
   treatment_rate: 0.3
   noise_level: 0.1
-  true_ate: 15.0  # True average treatment effect in dollars
+  true_ate: 15.0  # Base treatment effect in dollars (before heterogeneity terms)
   confounding_strength: 2.0
 
 # Feature engineering
@@ -41,40 +45,58 @@ propensity:
   clip_bounds: [0.01, 0.99]  # Bounds for propensity score clipping
   trim_percentiles: [1, 99]   # Trim extreme weights at these percentiles
   calibration_bins: 10
+  # Propensity model used for IPW/AIPW point estimates AND refit inside the
+  # bootstrap ("logistic", "gbm" or "ensemble"). Logistic is cheap to refit and
+  # correctly specified for the synthetic data; gbm/ensemble are reported as diagnostics.
+  ate_model: "logistic"
   models:
     logistic:
       max_iter: 1000
       C: 1.0
     gbm:
-      n_estimators: 100
-      max_depth: 5
+      n_estimators: 50
+      max_depth: 3
       learning_rate: 0.1
       min_samples_leaf: 50
 
 # ATE estimation
 ate:
-  bootstrap_iterations: 500
+  bootstrap_iterations: 100
   bootstrap_confidence_level: 0.95
   ipw_stabilize: true
+  outcome_models: ["linear", "rf"]   # AIPW outcome-model variants to run
+  rf_outcome_model:                  # Random-forest outcome model for AIPW
+    n_estimators: 30
+    max_depth: 6
+    min_samples_leaf: 20
 
 # CATE estimation
 cate:
-  cross_fitting_folds: 5
+  cross_fitting_folds: 3
   dr_learner:
     model_regression:
-      n_estimators: 100
-      max_depth: 6
+      n_estimators: 50
+      max_depth: 4
       min_samples_leaf: 20
     model_propensity:
+      n_estimators: 50
+      max_depth: 3
+    model_final:
       n_estimators: 100
-      max_depth: 4
-  orthogonal_forest:
-    n_trees: 500
+      max_depth: 6
+      min_samples_leaf: 10
+  causal_forest:
+    n_trees: 200
     min_leaf_size: 10
     max_depth: 10
-    subsample_ratio: 0.7
+    model_y:
+      n_estimators: 50
+      max_depth: 4
+    model_t:
+      n_estimators: 50
+      max_depth: 3
   x_learner:
-    n_estimators: 100
+    n_estimators: 50
     max_depth: 6
 
 # Policy evaluation

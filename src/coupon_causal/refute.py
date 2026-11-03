@@ -62,7 +62,6 @@ def run_dowhy_analysis(
         Dictionary with causal model and refutation results
     """
     try:
-        import dowhy
         from dowhy import CausalModel
     except ImportError:
         logger.error("DoWhy not installed. Install with: pip install dowhy")

@@ -72,8 +72,8 @@ def main():
         treatment_capacity=treatment_capacity,
     )
 
-    # Create targeting recommendations
-    recommendations = policy.create_targeting_recommendations(
+    # Create targeting recommendations (written to args.output)
+    policy.create_targeting_recommendations(
         cate_scores,
         df,
         threshold,

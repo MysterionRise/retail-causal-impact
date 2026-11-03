@@ -116,11 +116,12 @@ def compute_auuc(
     fractions, qini_values, random_baseline = compute_qini_curve(cate_scores, T, Y, n_bins=100)
 
     # Compute area under curve using trapezoidal rule
-    auuc = np.trapz(qini_values, fractions)
+    # (np.trapezoid replaced np.trapz in NumPy 2.0; the old alias was removed in 2.4)
+    auuc = np.trapezoid(qini_values, fractions)
 
     if normalize:
         # Compute area under random baseline
-        auuc_random = np.trapz(random_baseline, fractions)
+        auuc_random = np.trapezoid(random_baseline, fractions)
         # Normalize: AUUC_norm = (AUUC - AUUC_random) / AUUC_random
         if auuc_random != 0:
             auuc_normalized = (auuc - auuc_random) / abs(auuc_random)

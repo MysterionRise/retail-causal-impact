@@ -36,8 +36,7 @@ jobs:
 
     - name: Lint with ruff
       run: |
-        ruff check src/ tests/ scripts/ --output-format=github
-      continue-on-error: true
+        ruff check src/ tests/ scripts/ app/ --output-format=github
 
     - name: Type check with mypy
       run: |

@@ -1,6 +1,6 @@
 # Coupon Causal Impact Analysis
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/MysterionRise/retail-causal-impact/workflows/CI/badge.svg)](https://github.com/MysterionRise/retail-causal-impact/actions)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![codecov](https://codecov.io/gh/MysterionRise/retail-causal-impact/branch/main/graph/badge.svg)](https://codecov.io/gh/MysterionRise/retail-causal-impact)
@@ -11,7 +11,7 @@ Production-quality causal impact analysis for retail coupon campaigns. Estimate 
 
 - **Causal Estimation**
   - Average Treatment Effect (ATE): IPW, AIPW (doubly-robust)
-  - Conditional ATE (CATE): DRLearner, Orthogonal Random Forest, X-Learner
+  - Conditional ATE (CATE): DRLearner, Causal Forest (CausalForestDML), X-Learner
   - Propensity score modeling with diagnostics
   - Covariate balance assessment (Love plots, SMD)
 
@@ -52,7 +52,7 @@ Production-quality causal impact analysis for retail coupon campaigns. Estimate 
 
 ### Prerequisites
 
-- Python 3.10 or higher
+- Python 3.11, 3.12 or 3.13
 - pip
 
 ### Setup
@@ -88,14 +88,21 @@ See `pyproject.toml` for full dependency list with pinned versions.
 Run the complete pipeline on synthetic data:
 
 ```bash
-# Run full pipeline: data → estimation → reports
+# Run the pipeline: data → estimation → reports (fast demo profile, ~1.5 min on 4 cores)
 make all
 
 # Or step-by-step:
 make data        # Generate synthetic data
 make train       # Run causal estimation
 make report      # Generate plots and tables
+
+# Heavier profile: 500 bootstrap draws, bigger forests, 5-fold cross-fitting (~15-25 min)
+make full
 ```
+
+Two config profiles are provided: `config/default.yaml` (fast, used by `make all`) and
+`config/full.yaml` (thorough). Both run every estimator; they differ only in bootstrap
+draws, model sizes and cross-fitting folds.
 
 ### Launch Dashboard
 
@@ -125,7 +132,7 @@ python -m pytest tests/test_synth_recovery.py -v
 - `test_balance.py` - Tests covariate balance improvement after propensity weighting
 - `test_policy.py` - Tests policy learning and uplift evaluation (Qini, AUUC)
 
-**Current Coverage:** 45% overall (17 tests, all passing)
+17 tests, all passing on Python 3.11-3.13 with NumPy 2.4+.
 
 ## 📖 Usage
 
@@ -178,7 +185,7 @@ Three step-by-step notebooks are provided:
 2. **`notebooks/10_causal_estimation.ipynb`** - Causal Estimation
    - Propensity score modeling
    - ATE estimation (naive, IPW, AIPW)
-   - CATE estimation (DRLearner, ORF, X-Learner)
+   - CATE estimation (DRLearner, Causal Forest, X-Learner)
    - Balance diagnostics
 
 3. **`notebooks/20_policy_uplift.ipynb`** - Policy & Uplift
@@ -213,7 +220,8 @@ Features:
 ```
 retail-causal-impact/
 ├── config/
-│   └── default.yaml          # Configuration (seeds, hyperparameters, paths)
+│   ├── default.yaml          # Fast demo profile (seeds, hyperparameters, paths)
+│   └── full.yaml             # Thorough profile (500 bootstrap draws, larger forests)
 ├── data/
 │   ├── raw/                  # Place public datasets here
 │   ├── interim/
@@ -223,7 +231,7 @@ retail-causal-impact/
 │   ├── features.py           # Feature engineering
 │   ├── propensity.py         # Propensity score models
 │   ├── ate.py                # ATE estimation (IPW, AIPW)
-│   ├── cate.py               # CATE estimation (DRLearner, ORF, X-Learner)
+│   ├── cate.py               # CATE estimation (DRLearner, Causal Forest, X-Learner)
 │   ├── policy.py             # Policy learning, Qini, AUUC
 │   ├── balance.py            # Balance diagnostics (SMD, Love plots)
 │   ├── refute.py             # Refutation & sensitivity (DoWhy)
@@ -248,6 +256,7 @@ retail-causal-impact/
 ├── models/                   # Saved models and results
 ├── Makefile                  # Build automation
 ├── pyproject.toml            # Dependencies & package config
+├── LICENSE                   # MIT
 └── README.md                 # This file
 ```
 
@@ -258,9 +267,14 @@ retail-causal-impact/
 The synthetic data generator creates realistic confounded coupon campaign data:
 
 1. **Customer Features**: Loyalty, recency, frequency, monetary value, price sensitivity, segments
-2. **Confounded Treatment Assignment**: Treatment depends on loyalty and segment (companies target loyal customers)
-3. **Heterogeneous Treatment Effects**: Effect varies by price sensitivity and loyalty
-4. **Known Ground Truth**: True ATE and CATE for validation
+2. **Confounded Treatment Assignment**: A propensity score p(X) rises with loyalty, recency,
+   frequency and the high-value segment (companies target loyal customers). Treatment is
+   *drawn* as T ~ Bernoulli(p(X)), so every customer has a non-zero chance of either arm
+   and the positivity assumption holds. The logit intercept is calibrated to the target
+   treatment rate.
+3. **Heterogeneous Treatment Effects**: Effect varies by price sensitivity, loyalty and segment
+   (new and low-value customers respond most; loyal customers least)
+4. **Known Ground Truth**: True propensity, true CATE and true ATE are stored for validation
 
 ### Causal Estimation Pipeline
 
@@ -270,8 +284,9 @@ The synthetic data generator creates realistic confounded coupon campaign data:
    - Leakage prevention (drop post-treatment variables)
 
 2. **Propensity Score Modeling**
-   - Logistic regression + Gradient boosting (ensemble)
-   - Cross-validation to prevent overfitting
+   - Logistic regression and gradient boosting are both fit (out-of-fold predictions)
+   - The model used for weighting and ATE is set by `propensity.ate_model`
+     (default `logistic`, which is also what the bootstrap refits on every draw)
    - Calibration diagnostics, overlap assessment
    - Clipping to [0.01, 0.99] for stability
 
@@ -280,11 +295,12 @@ The synthetic data generator creates realistic confounded coupon campaign data:
    - **IPW**: Inverse propensity weighting with stabilization
    - **AIPW (Doubly-Robust)**: Combines outcome models + IPW
      - Linear and Random Forest outcome models
-   - Bootstrap 95% confidence intervals (500 iterations)
+   - Percentile bootstrap 95% confidence intervals, refitting the propensity model on
+     each draw (100 draws in the default profile, 500 in `config/full.yaml`)
 
 4. **CATE Estimation**
    - **DRLearner** (EconML): Doubly-robust with cross-fitting
-   - **Orthogonal Random Forest** (EconML): Causal forest with orthogonalization
+   - **Causal Forest** (EconML `CausalForestDML`): forest on orthogonalised residuals
    - **X-Learner**: Two-stage meta-learner with propensity weighting
 
 5. **Balance Diagnostics**
@@ -346,33 +362,63 @@ The synthetic data generator creates realistic confounded coupon campaign data:
 
 ### Synthetic Data Validation
 
-On synthetic data with known ground truth (true ATE = $15.00):
+All numbers below come from `make all` with `config/default.yaml` (10,000 customers,
+seed 42) and are written to `reports/tables/`. The generator's realised true ATE for this
+seed is **$15.56** (the `true_ate: 15.0` config value is the base effect before the
+heterogeneity terms).
 
-| Method | ATE Estimate | 95% CI | Error |
-|--------|--------------|--------|-------|
-| Naive | $18.50 | [$17.20, $19.80] | **+$3.50** (biased) |
-| IPW | $14.80 | [$13.10, $16.50] | -$0.20 |
-| AIPW (Linear) | $14.95 | [$13.50, $16.40] | -$0.05 ✓ |
-| AIPW (RF) | $15.10 | [$13.80, $16.40] | +$0.10 ✓ |
+| Method | ATE Estimate | 95% CI | Error vs true |
+|--------|--------------|--------|---------------|
+| Naive | $23.61 | [$22.92, $24.25] | **+$8.05** (biased by confounding) |
+| IPW | $15.71 | [$15.17, $16.22] | +$0.15 |
+| AIPW (Linear) | $15.79 | [$15.40, $16.26] | +$0.23 |
+| AIPW (RF) | $15.99 | [$15.68, $16.56] | +$0.43 |
 
-- **AIPW** recovers true ATE within 1% error
-- **AUUC** > 0.30 (learned policy beats random by 30%+)
-- **CATE heterogeneity** correctly identified (correlation > 0.65 with true CATE)
+- **Naive** overstates the effect by about 50% because loyal, high-spending customers
+  are more likely to receive coupons.
+- **IPW and AIPW** land within a few percent of the truth, and every interval contains it.
+- **Balance**: mean standardised mean difference drops from 0.100 to 0.011 after
+  weighting; the largest imbalance (high-value segment, 0.47) drops to 0.01, the largest
+  remaining SMD is 0.04, and all 20 covariates are below the 0.1 threshold.
+- **CATE**: in-sample correlation with the true per-customer effect is 0.85 for the
+  Causal Forest, 0.83 for DRLearner and 0.77 for the X-Learner. Per-segment predicted
+  uplift tracks the truth closely (new customers $23.0 vs $23.5 true; low value $20.1
+  vs $19.4; mid value $11.5 vs $11.4; high value $11.5 vs $11.3).
+- **Policy**: normalised AUUC of 0.11 for Causal Forest targeting; the top 20% by
+  predicted uplift have a predicted average effect of $22.84 against a population
+  average of $15.56.
+
+The CATE numbers above are in-sample; held-out CATE evaluation and wiring the DoWhy
+refutation tests into the pipeline are planned follow-ups.
 
 ### Example Output
 
 ```
 AVERAGE TREATMENT EFFECT ESTIMATION
 ====================================
-Naive ATE: $18.50
-IPW ATE: $14.80
-AIPW ATE: $14.95 [$13.50, $16.40]
+[1/4] Naive difference in means...
+Bootstrap CI (95%) from 100 iterations: $23.61 [22.92, 24.25]
+[2/4] Inverse Propensity Weighting (IPW)...
+Bootstrap CI (95%) from 100 iterations: $15.71 [15.17, 16.22]
+[3/4] AIPW with linear outcome models...
+Bootstrap CI (95%) from 100 iterations: $15.79 [15.40, 16.26]
+[4/4] AIPW with Random Forest outcome models...
+Bootstrap CI (95%) from 100 iterations: $15.99 [15.68, 16.56]
+
+CATE ESTIMATION
+===============
+DRLearner CATE     - mean: $15.88, std: $5.43
+Causal Forest CATE - mean: $15.78, std: $5.01
+X-Learner CATE     - mean: $16.08, std: $5.63
+
+BALANCE DIAGNOSTICS
+===================
+Before weighting - Mean SMD: 0.100   (70% of covariates below 0.1)
+After weighting  - Mean SMD: 0.011   (100% of covariates below 0.1)
 
 POLICY EVALUATION
 =================
-AUUC (normalized): 0.342
-Budget: 20% → Expected uplift: $2,940
-Budget: 30% → Expected uplift: $4,200
+Area Under Uplift Curve (AUUC, normalised): 0.110
 ```
 
 ## 🔗 References
@@ -380,7 +426,7 @@ Budget: 30% → Expected uplift: $4,200
 ### Causal Inference Methods
 
 - **Doubly-Robust Estimation**: Robins, Rotnitzky, Zhao (1994)
-- **Orthogonal Random Forest**: Wager & Athey (2018), "Estimation and Inference of Heterogeneous Treatment Effects using Random Forests"
+- **Causal Forest**: Wager & Athey (2018), "Estimation and Inference of Heterogeneous Treatment Effects using Random Forests"; Athey, Tibshirani & Wager (2019), "Generalized Random Forests"
 - **DRLearner**: Chernozhukov et al. (2018), "Double/debiased machine learning for treatment and structural parameters"
 - **X-Learner**: Künzel et al. (2019), "Metalearners for estimating heterogeneous treatment effects"
 
@@ -406,7 +452,7 @@ Contributions welcome! Please:
 
 ## 📝 License
 
-MIT License - see LICENSE file
+MIT License - see [LICENSE](LICENSE)
 
 ## 📧 Contact
 
