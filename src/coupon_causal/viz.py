@@ -256,9 +256,14 @@ def plot_ate_comparison(
     ci_lowers = np.array(ci_lowers)
     ci_uppers = np.array(ci_uppers)
 
-    # Compute error bars
+    # Compute error bars (matplotlib rejects negative lengths, which happen if a
+    # bootstrap interval does not contain its point estimate; clip and warn)
     errors_lower = estimates - ci_lowers
     errors_upper = ci_uppers - estimates
+    if np.nanmin(errors_lower) < 0 or np.nanmin(errors_upper) < 0:
+        logger.warning("Some confidence intervals exclude their point estimate; clipping error bars")
+        errors_lower = np.clip(errors_lower, 0, None)
+        errors_upper = np.clip(errors_upper, 0, None)
 
     fig, ax = plt.subplots(figsize=(10, 6))
 

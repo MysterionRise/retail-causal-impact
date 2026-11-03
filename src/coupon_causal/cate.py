@@ -4,7 +4,7 @@ Conditional Average Treatment Effect (CATE) estimation.
 
 Implements multiple methods for estimating heterogeneous treatment effects:
 - DRLearner (EconML)
-- Orthogonal Random Forest (EconML)
+- Causal Forest via CausalForestDML (EconML)
 - X-Learner
 """
 
@@ -14,6 +14,18 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 
 logger = logging.getLogger(__name__)
+
+
+def _rf_from_config(params: dict, random_state: int, **defaults) -> RandomForestRegressor:
+    """Build a RandomForestRegressor from a config dict with fallbacks."""
+    merged = {**defaults, **params}
+    return RandomForestRegressor(
+        n_estimators=merged.get("n_estimators", 100),
+        max_depth=merged.get("max_depth", 6),
+        min_samples_leaf=merged.get("min_samples_leaf", 10),
+        random_state=random_state,
+        n_jobs=-1,
+    )
 
 
 class XLearner:
@@ -192,13 +204,13 @@ def fit_dr_learner(
         random_state=config.get("random_state", 42),
     )
 
-    # Final CATE model (default to Random Forest)
-    model_final = RandomForestRegressor(
+    # Final CATE model (Random Forest; size configurable)
+    model_final = _rf_from_config(
+        dr_config.get("model_final", {}),
+        random_state=config.get("random_state", 42),
         n_estimators=100,
         max_depth=6,
         min_samples_leaf=10,
-        random_state=config.get("random_state", 42),
-        n_jobs=-1,
     )
 
     # Initialize DRLearner
@@ -221,14 +233,14 @@ def fit_dr_learner(
     return cate_pred, dr_learner
 
 
-def fit_orthogonal_forest(
+def fit_causal_forest(
     X: np.ndarray,
     Y: np.ndarray,
     T: np.ndarray,
     config: dict,
 ) -> tuple[np.ndarray, object, np.ndarray]:
     """
-    Fit EconML CausalForest (Orthogonal Random Forest) for CATE estimation.
+    Fit EconML CausalForestDML (a causal forest on orthogonalised residuals).
 
     Args:
         X: Feature matrix
@@ -246,33 +258,38 @@ def fit_orthogonal_forest(
         logger.error("EconML not installed. Install with: pip install econml")
         raise
 
-    logger.info("Fitting Orthogonal Random Forest for CATE estimation...")
+    logger.info("Fitting Causal Forest (CausalForestDML) for CATE estimation...")
 
     cate_config = config.get("cate", {})
-    orf_config = cate_config.get("orthogonal_forest", {})
+    cf_config = cate_config.get("causal_forest", {})
     cv_folds = cate_config.get("cross_fitting_folds", 5)
+    random_state = config.get("random_state", 42)
 
-    # Nuisance models
+    # Nuisance models (sizes configurable so the fast profile stays fast)
+    model_y_cfg = cf_config.get("model_y", {})
     model_y = GradientBoostingRegressor(
-        n_estimators=100,
-        max_depth=5,
-        random_state=config.get("random_state", 42),
+        n_estimators=model_y_cfg.get("n_estimators", 100),
+        max_depth=model_y_cfg.get("max_depth", 5),
+        random_state=random_state,
     )
+    model_t_cfg = cf_config.get("model_t", {})
     model_t = GradientBoostingClassifier(
-        n_estimators=100,
-        max_depth=4,
-        random_state=config.get("random_state", 42),
+        n_estimators=model_t_cfg.get("n_estimators", 100),
+        max_depth=model_t_cfg.get("max_depth", 4),
+        random_state=random_state,
     )
 
-    # Causal Forest
+    # Causal Forest. discrete_treatment=True is required when model_t is a
+    # classifier; without it EconML raises and the method silently drops out.
     causal_forest = CausalForestDML(
         model_y=model_y,
         model_t=model_t,
-        n_estimators=orf_config.get("n_trees", 500),
-        min_samples_leaf=orf_config.get("min_leaf_size", 10),
-        max_depth=orf_config.get("max_depth", 10),
+        discrete_treatment=True,
+        n_estimators=cf_config.get("n_trees", 500),
+        min_samples_leaf=cf_config.get("min_leaf_size", 10),
+        max_depth=cf_config.get("max_depth", 10),
         cv=cv_folds,
-        random_state=config.get("random_state", 42),
+        random_state=random_state,
         n_jobs=-1,
     )
 
@@ -284,15 +301,13 @@ def fit_orthogonal_forest(
 
     # Feature importances
     try:
-        # Try to get feature importances from the causal forest
-        feature_importances = causal_forest.feature_importances()
-    except:
-        # Fallback: compute as variance of CATE predictions per feature
+        feature_importances = np.asarray(causal_forest.feature_importances())
+    except Exception as e:
         feature_importances = np.zeros(X.shape[1])
-        logger.warning("Could not extract feature importances from model")
+        logger.warning(f"Could not extract feature importances from model: {e}")
 
     logger.info(
-        f"Orthogonal Forest CATE - mean: ${cate_pred.mean():.2f}, std: ${cate_pred.std():.2f}"
+        f"Causal Forest CATE - mean: ${cate_pred.mean():.2f}, std: ${cate_pred.std():.2f}"
     )
 
     return cate_pred, causal_forest, feature_importances
@@ -381,22 +396,22 @@ def estimate_all_cate_methods(
         logger.error(f"DRLearner failed: {e}")
         results["dr_learner"] = None
 
-    # 2. Orthogonal Forest
-    logger.info("\n[2/3] Fitting Orthogonal Random Forest...")
+    # 2. Causal Forest
+    logger.info("\n[2/3] Fitting Causal Forest (CausalForestDML)...")
     try:
-        cate_orf, model_orf, feat_imp_orf = fit_orthogonal_forest(X, Y, T, config)
-        results["orthogonal_forest"] = {
-            "cate": cate_orf,
-            "model": model_orf,
-            "feature_importances": feat_imp_orf,
-            "mean": cate_orf.mean(),
-            "std": cate_orf.std(),
-            "min": cate_orf.min(),
-            "max": cate_orf.max(),
+        cate_cf, model_cf, feat_imp_cf = fit_causal_forest(X, Y, T, config)
+        results["causal_forest"] = {
+            "cate": cate_cf,
+            "model": model_cf,
+            "feature_importances": feat_imp_cf,
+            "mean": cate_cf.mean(),
+            "std": cate_cf.std(),
+            "min": cate_cf.min(),
+            "max": cate_cf.max(),
         }
     except Exception as e:
-        logger.error(f"Orthogonal Forest failed: {e}")
-        results["orthogonal_forest"] = None
+        logger.error(f"Causal Forest failed: {e}")
+        results["causal_forest"] = None
 
     # 3. X-Learner
     logger.info("\n[3/3] Fitting X-Learner...")
@@ -449,6 +464,6 @@ def compute_cate_intervals(
         # EconML models support .effect_interval()
         lb, ub = cate_model.effect_interval(X, alpha=alpha)
         return lb, ub
-    except:
-        logger.warning("CATE model does not support confidence intervals")
+    except Exception as e:
+        logger.warning(f"CATE model does not support confidence intervals: {e}")
         return None, None

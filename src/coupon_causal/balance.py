@@ -7,6 +7,7 @@ before and after propensity score weighting.
 """
 
 import logging
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -138,7 +139,7 @@ def compare_balance_before_after(
 def assess_balance_quality(
     balance_df: pd.DataFrame,
     smd_threshold: float = 0.1,
-) -> dict[str, any]:
+) -> dict[str, Any]:
     """
     Assess overall balance quality.
 
@@ -254,7 +255,7 @@ def check_positivity(
     T: np.ndarray,
     lower_threshold: float = 0.01,
     upper_threshold: float = 0.99,
-) -> dict[str, any]:
+) -> dict[str, Any]:
     """
     Check positivity assumption (overlap in propensity scores).
 

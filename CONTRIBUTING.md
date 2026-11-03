@@ -72,11 +72,11 @@ ruff check src/ tests/ scripts/ --fix
 ### Running the Pipeline
 
 ```bash
-# Quick test with synthetic data
-python test_quick.py
-
-# Full pipeline
+# Fast demo profile (config/default.yaml): data → estimation → report
 make all
+
+# Heavy profile (config/full.yaml): 500 bootstrap draws, larger forests
+make full
 
 # Individual stages
 make data

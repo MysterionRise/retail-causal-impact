@@ -1,5 +1,5 @@
 # path: Makefile
-.PHONY: help setup data train report app test lint clean all
+.PHONY: help setup data train report full app test lint clean all
 
 help:
 	@echo "Coupon Causal Impact Analysis - Available Commands:"
@@ -7,11 +7,12 @@ help:
 	@echo "  make data     - Generate/load data"
 	@echo "  make train    - Run causal estimation pipeline"
 	@echo "  make report   - Generate reports and figures"
+	@echo "  make full     - Run data → train → report with the heavy config/full.yaml profile"
 	@echo "  make app      - Launch Streamlit dashboard"
 	@echo "  make test     - Run test suite"
 	@echo "  make lint     - Run code quality checks"
 	@echo "  make clean    - Remove generated files"
-	@echo "  make all      - Run full pipeline (setup → data → train → report)"
+	@echo "  make all      - Run pipeline with the fast default profile (setup → data → train → report)"
 
 setup:
 	@echo "Setting up environment..."
@@ -36,6 +37,11 @@ report:
 	python -m scripts.run_pipeline --config config/default.yaml --data_source synth --stage report
 	@echo "Reports saved to reports/"
 
+full:
+	@echo "Running full-profile pipeline (this takes a while)..."
+	python -m scripts.run_pipeline --config config/full.yaml --data_source synth --stage all
+	@echo "Full pipeline complete! Reports saved to reports/"
+
 app:
 	@echo "Launching Streamlit dashboard..."
 	streamlit run app/streamlit_app.py
@@ -47,7 +53,7 @@ test:
 
 lint:
 	@echo "Running code quality checks..."
-	ruff check src/ tests/ scripts/
+	ruff check src/ tests/ scripts/ app/
 	mypy src/coupon_causal/
 	@echo "Linting complete!"
 

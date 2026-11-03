@@ -49,6 +49,7 @@ target-version = "py312"
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = [
     "E501",  # Line too long (handled by formatter)
+    "N803",  # Argument should be lowercase (X, T, Y are standard in causal inference)
     "N806",  # Variable should be lowercase (X, T, Y are standard in causal inference)
 ]
 

@@ -116,10 +116,22 @@ def run_estimation_stage(config, df):
         X, T, config
     )
 
+    # Choose which propensity scores drive IPW/AIPW. The bootstrap refits the
+    # same model on every draw, so this must be something cheap to refit
+    # (logistic by default). GBM and the ensemble are still fit above and
+    # reported as diagnostics.
+    propensity_model_type = config["propensity"].get("ate_model", "logistic")
+    propensity_scores = {
+        "logistic": logistic_prop.propensity_scores_,
+        "gbm": gbm_prop.propensity_scores_,
+        "ensemble": ensemble_prop,
+    }[propensity_model_type]
+    logger.info(f"Using {propensity_model_type} propensity scores for weighting and ATE")
+
     # Compute IPW weights
     ipw_weights = propensity.compute_ipw_weights(
         T,
-        ensemble_prop,
+        propensity_scores,
         stabilize=config["ate"]["ipw_stabilize"],
         trim_percentiles=tuple(config["propensity"]["trim_percentiles"]),
     )
@@ -129,7 +141,9 @@ def run_estimation_stage(config, df):
     logger.info("AVERAGE TREATMENT EFFECT (ATE) ESTIMATION")
     logger.info("-" * 80)
 
-    ate_results = ate.estimate_all_ate_methods(X, Y, T, ensemble_prop, config)
+    ate_results = ate.estimate_all_ate_methods(
+        X, Y, T, propensity_scores, config, propensity_model_type=propensity_model_type
+    )
 
     # Estimate CATE
     logger.info("\n" + "-" * 80)
@@ -137,13 +151,13 @@ def run_estimation_stage(config, df):
     logger.info("-" * 80)
 
     cate_results = cate.estimate_all_cate_methods(
-        X, Y, T, ensemble_prop, config, feature_engineer.get_feature_names()
+        X, Y, T, propensity_scores, config, feature_engineer.get_feature_names()
     )
 
-    # Use best CATE method (Orthogonal Forest if available, else DR Learner)
-    if cate_results.get("orthogonal_forest") is not None:
-        cate_scores = cate_results["orthogonal_forest"]["cate"]
-        cate_method = "orthogonal_forest"
+    # Use best CATE method (Causal Forest if available, else DR Learner)
+    if cate_results.get("causal_forest") is not None:
+        cate_scores = cate_results["causal_forest"]["cate"]
+        cate_method = "causal_forest"
     elif cate_results.get("dr_learner") is not None:
         cate_scores = cate_results["dr_learner"]["cate"]
         cate_method = "dr_learner"
@@ -188,7 +202,8 @@ def run_estimation_stage(config, df):
 
     results = {
         "feature_engineer": feature_engineer,
-        "propensity_scores": ensemble_prop,
+        "propensity_scores": propensity_scores,
+        "propensity_model_type": propensity_model_type,
         "ipw_weights": ipw_weights,
         "ate_results": ate_results,
         "cate_results": cate_results,
