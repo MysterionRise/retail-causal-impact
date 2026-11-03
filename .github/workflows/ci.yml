@@ -26,7 +26,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+        pip install -e ".[dev,api]"
 
     - name: Create required directories
       run: |
@@ -36,7 +36,7 @@ jobs:
 
     - name: Lint with ruff
       run: |
-        ruff check src/ tests/ scripts/ app/ --output-format=github
+        ruff check src/ tests/ scripts/ app/ services/ --output-format=github
 
     - name: Type check with mypy
       run: |
@@ -45,7 +45,7 @@ jobs:
 
     - name: Run tests with pytest
       run: |
-        pytest tests/ -v --tb=short --cov=src/coupon_causal --cov-report=xml --cov-report=term-missing
+        pytest tests/ services/api/tests -v --tb=short --cov=src/coupon_causal --cov=services/api --cov-report=xml --cov-report=term-missing
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
@@ -145,3 +145,31 @@ jobs:
       run: |
         python -m scripts.run_pipeline --help
         python -m scripts.score_policy --help
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install
+      run: npm ci --no-audit --no-fund
+
+    - name: Type check
+      run: npx tsc --noEmit -p tsconfig.json
+
+    - name: Lint
+      run: npx eslint .
+
+    - name: Build
+      run: npm run build
