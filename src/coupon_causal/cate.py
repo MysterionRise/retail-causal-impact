@@ -467,3 +467,27 @@ def compute_cate_intervals(
     except Exception as e:
         logger.warning(f"CATE model does not support confidence intervals: {e}")
         return None, None
+
+
+def predict_cate(
+    method_name: str,
+    method_results: dict,
+    X: np.ndarray,
+    propensity_scores: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Predict CATE on new rows with a fitted model from ``estimate_all_cate_methods``.
+
+    Args:
+        method_name: 'dr_learner', 'causal_forest' or 'x_learner'
+        method_results: The entry for that method (must contain 'model')
+        X: Feature matrix to score
+        propensity_scores: Needed by the X-Learner for its weighted combination
+
+    Returns:
+        Predicted CATE for each row of X
+    """
+    model = method_results["model"]
+    if method_name == "x_learner":
+        return model.predict(X, propensity_scores)
+    return np.asarray(model.effect(X)).ravel()

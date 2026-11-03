@@ -2,7 +2,7 @@
 """
 Main CLI pipeline for coupon causal impact analysis.
 
-Runs end-to-end:  data → features → estimation → reports
+Runs end-to-end:  data → features → estimation → refutation → reports
 """
 
 import argparse
@@ -13,7 +13,9 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+import numpy as np
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 from coupon_causal import (
     ate,
@@ -23,9 +25,13 @@ from coupon_causal import (
     features,
     policy,
     propensity,
+    refute,
     utils,
     viz,
 )
+
+# Preference order for the CATE model used downstream (policy, segments, app)
+CATE_METHOD_PREFERENCE = ["causal_forest", "dr_learner", "x_learner"]
 
 
 def parse_args():
@@ -91,6 +97,12 @@ def run_data_stage(config, data_source, input_path=None):
     return df
 
 
+def _section(logger, title):
+    logger.info("\n" + "-" * 80)
+    logger.info(title)
+    logger.info("-" * 80)
+
+
 def run_estimation_stage(config, df):
     """Run causal estimation stage."""
     logger = logging.getLogger("coupon_causal")
@@ -98,19 +110,22 @@ def run_estimation_stage(config, df):
     logger.info("STAGE 2: CAUSAL ESTIMATION")
     logger.info("=" * 80)
 
+    random_state = config.get("random_state", 42)
+
     # Prepare features
     X, T, Y, feature_engineer = features.prepare_features(
         df, config["features"], fit=True
     )
+    feature_names = feature_engineer.get_feature_names()
 
     logger.info(f"\nFeature matrix: {X.shape}")
     logger.info(f"Treatment rate: {T.mean():.1%}")
     logger.info(f"Outcome mean: ${Y.mean():.2f}")
 
-    # Fit propensity models
-    logger.info("\n" + "-" * 80)
-    logger.info("PROPENSITY SCORE ESTIMATION")
-    logger.info("-" * 80)
+    # ------------------------------------------------------------------
+    # Propensity scores
+    # ------------------------------------------------------------------
+    _section(logger, "PROPENSITY SCORE ESTIMATION")
 
     logistic_prop, gbm_prop, ensemble_prop = propensity.fit_propensity_models(
         X, T, config
@@ -128,6 +143,8 @@ def run_estimation_stage(config, df):
     }[propensity_model_type]
     logger.info(f"Using {propensity_model_type} propensity scores for weighting and ATE")
 
+    overlap = propensity.assess_overlap(propensity_scores, T)
+
     # Compute IPW weights
     ipw_weights = propensity.compute_ipw_weights(
         T,
@@ -136,59 +153,140 @@ def run_estimation_stage(config, df):
         trim_percentiles=tuple(config["propensity"]["trim_percentiles"]),
     )
 
-    # Estimate ATE
-    logger.info("\n" + "-" * 80)
-    logger.info("AVERAGE TREATMENT EFFECT (ATE) ESTIMATION")
-    logger.info("-" * 80)
+    # ------------------------------------------------------------------
+    # ATE (full sample)
+    # ------------------------------------------------------------------
+    _section(logger, "AVERAGE TREATMENT EFFECT (ATE) ESTIMATION")
 
     ate_results = ate.estimate_all_ate_methods(
         X, Y, T, propensity_scores, config, propensity_model_type=propensity_model_type
     )
+    headline_method = "aipw_linear" if "aipw_linear" in ate_results else next(iter(ate_results))
+    headline_ate = ate_results[headline_method]["ate"]
 
-    # Estimate CATE
-    logger.info("\n" + "-" * 80)
-    logger.info("CONDITIONAL AVERAGE TREATMENT EFFECT (CATE) ESTIMATION")
-    logger.info("-" * 80)
-
-    cate_results = cate.estimate_all_cate_methods(
-        X, Y, T, propensity_scores, config, feature_engineer.get_feature_names()
-    )
-
-    # Use best CATE method (Causal Forest if available, else DR Learner)
-    if cate_results.get("causal_forest") is not None:
-        cate_scores = cate_results["causal_forest"]["cate"]
-        cate_method = "causal_forest"
-    elif cate_results.get("dr_learner") is not None:
-        cate_scores = cate_results["dr_learner"]["cate"]
-        cate_method = "dr_learner"
-    else:
-        cate_scores = cate_results["x_learner"]["cate"]
-        cate_method = "x_learner"
-
-    logger.info(f"\nUsing {cate_method} for policy evaluation")
-
-    # Balance diagnostics
-    logger.info("\n" + "-" * 80)
-    logger.info("BALANCE DIAGNOSTICS")
-    logger.info("-" * 80)
+    # ------------------------------------------------------------------
+    # Balance diagnostics (full sample)
+    # ------------------------------------------------------------------
+    _section(logger, "BALANCE DIAGNOSTICS")
 
     balance_before, balance_after, balance_summary = balance.compare_balance_before_after(
-        X, T, feature_engineer.get_feature_names(), ipw_weights
+        X, T, feature_names, ipw_weights
     )
 
-    # Policy evaluation
-    logger.info("\n" + "-" * 80)
-    logger.info("POLICY EVALUATION")
-    logger.info("-" * 80)
+    # ------------------------------------------------------------------
+    # Held-out split for everything predictive (CATE, policy, targeting)
+    # ------------------------------------------------------------------
+    eval_config = config.get("evaluation", {})
+    test_size = eval_config.get("test_size", 0.3)
+    idx_train, idx_test = train_test_split(
+        np.arange(len(Y)), test_size=test_size, random_state=random_state, stratify=T
+    )
+    X_tr, Y_tr, T_tr, e_tr = X[idx_train], Y[idx_train], T[idx_train], propensity_scores[idx_train]
+    X_te, Y_te, T_te, e_te = X[idx_test], Y[idx_test], T[idx_test], propensity_scores[idx_test]
+    true_cate_all = df["true_treatment_effect"].values if "true_treatment_effect" in df.columns else None
+    true_cate_te = true_cate_all[idx_test] if true_cate_all is not None else None
+
+    logger.info(f"\nHeld-out split: train={len(idx_train):,}  test={len(idx_test):,}")
+
+    # Doubly-robust pseudo-outcomes on the test set: outcome models fit on train,
+    # so ψ on the test rows is out-of-sample.
+    rf_params = config.get("ate", {}).get("rf_outcome_model", {})
+    _, (model_mu1, model_mu0) = ate.estimate_ate_aipw(
+        X_tr, Y_tr, T_tr, e_tr, model_type="rf", rf_params=rf_params
+    )
+    dr_scores_te = policy.compute_dr_scores(
+        Y_te, T_te, e_te, model_mu0.predict(X_te), model_mu1.predict(X_te)
+    )
+    logger.info(f"Mean DR pseudo-outcome on test set: ${dr_scores_te.mean():.2f}")
+
+    # ------------------------------------------------------------------
+    # CATE (fit on train, evaluate on test, score everyone for deployment)
+    # ------------------------------------------------------------------
+    _section(logger, "CONDITIONAL AVERAGE TREATMENT EFFECT (CATE) ESTIMATION")
+
+    cate_results = cate.estimate_all_cate_methods(
+        X_tr, Y_tr, T_tr, e_tr, config, feature_names
+    )
+
+    comparison_budget = config["policy"].get("comparison_budget", 0.2)
+    k_budget = max(1, int(comparison_budget * len(idx_test)))
+    heldout_rows = []
+    cate_test_by_method = {}
+    cate_all_by_method = {}
+    for method_name, method_results in cate_results.items():
+        if method_results is None:
+            continue
+        c_te = cate.predict_cate(method_name, method_results, X_te, e_te)
+        c_all = cate.predict_cate(method_name, method_results, X, propensity_scores)
+        cate_test_by_method[method_name] = c_te
+        cate_all_by_method[method_name] = c_all
+        top = np.argsort(-c_te)[:k_budget]
+        row = {
+            "method": method_name,
+            "mean_cate_test": float(c_te.mean()),
+            "std_cate_test": float(c_te.std()),
+            "auuc_heldout": float(policy.compute_auuc(c_te, T_te, Y_te)),
+            f"dr_uplift_top{int(comparison_budget * 100)}": float(dr_scores_te[top].mean()),
+        }
+        if true_cate_te is not None:
+            row["corr_true_cate_heldout"] = float(np.corrcoef(true_cate_te, c_te)[0, 1])
+            row[f"true_uplift_top{int(comparison_budget * 100)}"] = float(true_cate_te[top].mean())
+        heldout_rows.append(row)
+    cate_heldout_metrics = pd.DataFrame(heldout_rows)
+    logger.info("\nHeld-out CATE metrics:")
+    logger.info(f"\n{cate_heldout_metrics.round(3).to_string(index=False)}")
+
+    cate_method = next(m for m in CATE_METHOD_PREFERENCE if m in cate_test_by_method)
+    cate_scores = cate_all_by_method[cate_method]
+    cate_scores_test = cate_test_by_method[cate_method]
+    logger.info(f"\nUsing {cate_method} for policy evaluation and targeting")
+
+    # Calibration of the chosen model by predicted-effect decile (held-out)
+    cate_calibration = policy.cate_calibration_by_decile(
+        cate_scores_test, dr_scores_te, true_cate_te, n_bins=10
+    )
+
+    # ------------------------------------------------------------------
+    # Policy evaluation (held-out)
+    # ------------------------------------------------------------------
+    _section(logger, "POLICY EVALUATION (HELD-OUT)")
 
     policy_results = policy.evaluate_policy_uplift(
-        cate_scores, T, Y, budget_fractions=config["policy"]["budget_fractions"]
+        cate_scores_test,
+        T_te,
+        Y_te,
+        budget_fractions=config["policy"]["budget_fractions"],
+        dr_scores=dr_scores_te,
     )
 
-    auuc = policy.compute_auuc(cate_scores, T, Y, normalize=True)
-    logger.info(f"\nArea Under Uplift Curve (AUUC): {auuc:.3f}")
+    auuc = policy.compute_auuc(cate_scores_test, T_te, Y_te, normalize=True)
+    logger.info(f"\nArea Under Uplift Curve (AUUC, held-out): {auuc:.3f}")
 
-    # Segment analysis
+    # Predictive ML (response model) vs causal uplift targeting
+    _section(logger, "TARGETING: PREDICTIVE RESPONSE MODEL vs CAUSAL UPLIFT MODEL")
+
+    response_model = policy.fit_response_model(X_tr, Y_tr, T_tr, random_state=random_state)
+    strategy_scores = {
+        "uplift_model": cate_scores_test,
+        "response_model": response_model.predict(X_te),
+    }
+    targeting_comparison = policy.evaluate_targeting_strategies(
+        strategy_scores,
+        dr_scores_te,
+        budget_fraction=comparison_budget,
+        true_cate=true_cate_te,
+        random_state=random_state,
+    )
+    n_bins = config["policy"]["qini_bins"]
+    targeting_curves = {}
+    for name, scores in strategy_scores.items():
+        fractions, gain, random_baseline = policy.compute_dr_uplift_curve(
+            scores, dr_scores_te, n_bins=n_bins
+        )
+        targeting_curves[name] = (fractions, gain)
+    targeting_random_baseline = random_baseline
+
+    # Segment analysis (all customers, deployment scores)
     if "customer_segment" in df.columns:
         segment_stats = policy.segment_uplift_analysis(
             cate_scores, df, "customer_segment", top_k=10
@@ -196,7 +294,18 @@ def run_estimation_stage(config, df):
     else:
         segment_stats = None
 
-    # Save results
+    # ------------------------------------------------------------------
+    # Refutation and sensitivity (full sample, headline AIPW estimate)
+    # ------------------------------------------------------------------
+    _section(logger, "REFUTATION AND SENSITIVITY CHECKS")
+
+    refutation = refute.run_all_refutations(
+        df, X, Y, T, feature_names, propensity_scores, headline_ate, config
+    )
+
+    # ------------------------------------------------------------------
+    # Save
+    # ------------------------------------------------------------------
     models_path = Path(config["paths"]["models"])
     utils.ensure_dir(models_path)
 
@@ -204,16 +313,30 @@ def run_estimation_stage(config, df):
         "feature_engineer": feature_engineer,
         "propensity_scores": propensity_scores,
         "propensity_model_type": propensity_model_type,
+        "overlap": overlap,
         "ipw_weights": ipw_weights,
         "ate_results": ate_results,
-        "cate_results": cate_results,
-        "cate_scores": cate_scores,
+        "headline_ate_method": headline_method,
         "balance_before": balance_before,
         "balance_after": balance_after,
         "balance_summary": balance_summary,
+        "split": {"train_idx": idx_train, "test_idx": idx_test, "test_size": test_size},
+        "cate_results": cate_results,
+        "cate_method": cate_method,
+        "cate_scores": cate_scores,
+        "cate_scores_test": cate_scores_test,
+        "cate_heldout_metrics": cate_heldout_metrics,
+        "cate_calibration": cate_calibration,
+        "dr_scores_test": dr_scores_te,
+        "true_cate_test": true_cate_te,
         "policy_results": policy_results,
         "auuc": auuc,
+        "targeting_comparison": targeting_comparison,
+        "targeting_curves": targeting_curves,
+        "targeting_random_baseline": targeting_random_baseline,
         "segment_stats": segment_stats,
+        "refutation": refutation,
+        "dag": refutation.get("dowhy", {}).get("graph") or refute.build_causal_graph(list(df.columns)),
     }
 
     utils.save_artifact(results, str(models_path / "estimation_results.joblib"))
@@ -245,6 +368,9 @@ def run_report_stage(config, df, results):
     balance_before = results["balance_before"]
     balance_after = results["balance_after"]
     ate_results = results["ate_results"]
+    idx_test = results["split"]["test_idx"]
+    cate_scores_test = results["cate_scores_test"]
+    cate_method = results["cate_method"]
 
     # Generate visualizations
     logger.info("Generating visualizations...")
@@ -272,14 +398,14 @@ def run_report_stage(config, df, results):
         ate_results, save_path=str(figures_path / "04_ate_comparison.png")
     )
 
-    # 5. CATE distribution
+    # 5. CATE distribution (deployment scores, all customers)
     viz.plot_cate_distribution(
-        cate_scores, method_name="CATE", save_path=str(figures_path / "05_cate_distribution.png")
+        cate_scores, method_name=cate_method, save_path=str(figures_path / "05_cate_distribution.png")
     )
 
-    # 6. Qini curve
+    # 6. Qini curve (held-out)
     fractions, qini_values, random_baseline = policy.compute_qini_curve(
-        cate_scores, T, Y, n_bins=config["policy"]["qini_bins"]
+        cate_scores_test, T[idx_test], Y[idx_test], n_bins=config["policy"]["qini_bins"]
     )
     viz.plot_qini_curve(
         fractions, qini_values, random_baseline,
@@ -292,6 +418,31 @@ def run_report_stage(config, df, results):
             results["segment_stats"],
             save_path=str(figures_path / "07_segment_uplift.png")
         )
+
+    # 8. Predictive ML vs causal targeting (held-out)
+    viz.plot_targeting_comparison(
+        results["targeting_comparison"],
+        results["targeting_curves"],
+        results["targeting_random_baseline"],
+        save_path=str(figures_path / "08_targeting_ml_vs_causal.png"),
+    )
+
+    # 9. CATE validation (held-out)
+    viz.plot_cate_validation(
+        results["cate_calibration"],
+        cate_pred=cate_scores_test,
+        true_cate=results["true_cate_test"],
+        method_name=cate_method,
+        save_path=str(figures_path / "09_cate_validation.png"),
+    )
+
+    # 10. Refutation summary
+    headline_ate = ate_results[results["headline_ate_method"]]["ate"]
+    viz.plot_refutation_summary(
+        results["refutation"]["summary"],
+        headline_ate,
+        save_path=str(figures_path / "10_refutation_checks.png"),
+    )
 
     # Save tables
     logger.info("Saving summary tables...")
@@ -314,12 +465,26 @@ def run_report_stage(config, df, results):
     balance_before.to_csv(tables_path / "balance_before.csv", index=False)
     balance_after.to_csv(tables_path / "balance_after.csv", index=False)
 
-    # Policy results
+    # Policy, held-out CATE metrics, targeting comparison, calibration
     results["policy_results"].to_csv(tables_path / "policy_results.csv", index=False)
+    results["cate_heldout_metrics"].to_csv(tables_path / "cate_heldout_metrics.csv", index=False)
+    results["targeting_comparison"].to_csv(tables_path / "targeting_comparison.csv", index=False)
+    results["cate_calibration"].to_csv(tables_path / "cate_calibration_deciles.csv", index=False)
 
-    # CATE scores
+    # Refutation
+    refutation = results["refutation"]
+    refutation["summary"].to_csv(tables_path / "refutation_summary.csv", index=False)
+    refutation["leave_one_out"].to_csv(tables_path / "leave_one_out.csv", index=False)
+    pd.DataFrame([refutation["robustness"]]).to_csv(tables_path / "robustness_value.csv", index=False)
+    (tables_path / "causal_graph.dot").write_text(results["dag"] + "\n")
+
+    # CATE scores (deployment scores for everyone, plus held-out diagnostics)
     cate_df = df.copy()
     cate_df["predicted_cate"] = cate_scores
+    cate_df["is_test"] = False
+    cate_df.loc[cate_df.index[idx_test], "is_test"] = True
+    cate_df["dr_score"] = np.nan
+    cate_df.loc[cate_df.index[idx_test], "dr_score"] = results["dr_scores_test"]
     cate_df.to_parquet(tables_path / "cate_scores.parquet", index=False)
 
     logger.info(f"\nFigures saved to {figures_path}/")
@@ -339,6 +504,8 @@ def main():
         level=config["logging"]["level"],
         log_format=config["logging"]["format"],
     )
+    # DoWhy is chatty at INFO (and prints its full estimand on every refuter)
+    logging.getLogger("dowhy").setLevel(logging.WARNING)
 
     logger.info("Coupon Causal Impact Analysis Pipeline")
     logger.info(f"Config: {args.config}")

@@ -569,3 +569,212 @@ def plot_calibration_curve(
         logger.info(f"Saved figure to {save_path}")
 
     return fig
+
+
+def plot_targeting_comparison(
+    comparison: pd.DataFrame,
+    curves: dict[str, tuple[np.ndarray, np.ndarray]],
+    random_baseline: np.ndarray,
+    save_path: str | None = None,
+) -> Figure:
+    """
+    Predictive-ML targeting vs causal uplift targeting.
+
+    Left: cumulative doubly-robust gain as a function of the share of
+    customers targeted, one line per strategy. Right: incremental spend per
+    targeted customer at the comparison budget (doubly-robust estimate, plus
+    the true value when the data is synthetic).
+
+    Args:
+        comparison: Output of ``policy.evaluate_targeting_strategies``
+        curves: Mapping strategy -> (fractions, cumulative_gain)
+        random_baseline: Random-targeting baseline for the curves
+        save_path: Optional path to save figure
+
+    Returns:
+        Matplotlib Figure
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+
+    palette = {"uplift_model": "steelblue", "response_model": "coral", "random": "gray"}
+    labels = {
+        "uplift_model": "Causal uplift model (target by CATE)",
+        "response_model": "Predictive response model (target by spend)",
+        "random": "Random targeting",
+        "oracle (true CATE)": "Oracle (true CATE)",
+    }
+
+    for name, (fractions, gain) in curves.items():
+        ax1.plot(
+            fractions * 100,
+            gain,
+            linewidth=3,
+            color=palette.get(name, None),
+            label=labels.get(name, name),
+        )
+    fractions = next(iter(curves.values()))[0]
+    ax1.plot(fractions * 100, random_baseline, "--", color="gray", linewidth=2, label=labels["random"])
+    ax1.set_xlabel("% of customers targeted", fontsize=12)
+    ax1.set_ylabel("Cumulative incremental spend (doubly-robust, $)", fontsize=12)
+    ax1.set_title("Who to target first?", fontsize=14, fontweight="bold")
+    ax1.legend(loc="lower right")
+    ax1.grid(True, alpha=0.3)
+
+    budget = comparison["budget_fraction"].iloc[0]
+    order = comparison.sort_values("dr_uplift_per_customer", ascending=True)
+    y = np.arange(len(order))
+    has_truth = "true_uplift_per_customer" in order.columns
+    height = 0.38 if has_truth else 0.6
+    ax2.barh(
+        y + (height / 2 if has_truth else 0),
+        order["dr_uplift_per_customer"],
+        height=height,
+        color=[palette.get(s, "seagreen") for s in order["strategy"]],
+        label="Doubly-robust estimate",
+    )
+    if has_truth:
+        ax2.barh(
+            y - height / 2,
+            order["true_uplift_per_customer"],
+            height=height,
+            color="black",
+            alpha=0.25,
+            label="True (synthetic ground truth)",
+        )
+    ax2.set_yticks(y)
+    ax2.set_yticklabels([labels.get(s, s) for s in order["strategy"]])
+    ax2.axvline(0, color="black", linewidth=0.8)
+    ax2.set_xlabel(f"Incremental spend per targeted customer at {budget:.0%} budget ($)", fontsize=12)
+    ax2.set_title("Value of the targeted group", fontsize=14, fontweight="bold")
+    ax2.legend(loc="lower right")
+    ax2.grid(True, alpha=0.3, axis="x")
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        logger.info(f"Saved figure to {save_path}")
+    return fig
+
+
+def plot_cate_validation(
+    calibration: pd.DataFrame,
+    cate_pred: np.ndarray | None = None,
+    true_cate: np.ndarray | None = None,
+    method_name: str = "CATE",
+    save_path: str | None = None,
+) -> Figure:
+    """
+    Held-out validation of CATE predictions.
+
+    Left: calibration by predicted-effect decile (predicted vs doubly-robust
+    estimate, plus truth when available). Right (synthetic only): predicted
+    vs true per-customer effect.
+
+    Args:
+        calibration: Output of ``policy.cate_calibration_by_decile``
+        cate_pred: Held-out predictions (for the scatter)
+        true_cate: True held-out effects (for the scatter)
+        method_name: Label for the CATE method
+        save_path: Optional path to save figure
+
+    Returns:
+        Matplotlib Figure
+    """
+    has_truth = true_cate is not None and cate_pred is not None
+    fig, axes = plt.subplots(1, 2 if has_truth else 1, figsize=(15 if has_truth else 8, 6))
+    ax1 = axes[0] if has_truth else axes
+
+    x = calibration["decile"]
+    ax1.plot(x, calibration["predicted_cate"], "o-", color="steelblue", linewidth=2, markersize=8, label=f"Predicted ({method_name})")
+    ax1.errorbar(
+        x,
+        calibration["dr_estimate"],
+        yerr=1.96 * calibration["dr_se"],
+        fmt="s",
+        color="coral",
+        capsize=4,
+        markersize=7,
+        label="Doubly-robust estimate ± 95% CI",
+    )
+    if "true_cate" in calibration.columns:
+        ax1.plot(x, calibration["true_cate"], "^--", color="black", alpha=0.6, markersize=7, label="True effect")
+    ax1.set_xlabel("Decile of predicted effect (1 = lowest)", fontsize=12)
+    ax1.set_ylabel("Treatment effect ($)", fontsize=12)
+    ax1.set_title("Does predicted uplift track real uplift? (held-out)", fontsize=14, fontweight="bold")
+    ax1.set_xticks(x)
+    ax1.legend(loc="upper left")
+    ax1.grid(True, alpha=0.3)
+
+    if has_truth:
+        ax2 = axes[1]
+        ax2.scatter(true_cate, cate_pred, alpha=0.25, s=8, color="steelblue")
+        lo, hi = float(np.min(true_cate)), float(np.max(true_cate))
+        ax2.plot([lo, hi], [lo, hi], "r--", linewidth=2, label="Perfect prediction")
+        corr = np.corrcoef(true_cate, cate_pred)[0, 1]
+        ax2.text(
+            0.05, 0.95, f"Correlation: {corr:.3f}", transform=ax2.transAxes, fontsize=12,
+            verticalalignment="top", bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.5},
+        )
+        ax2.set_xlabel("True treatment effect ($)", fontsize=12)
+        ax2.set_ylabel("Predicted treatment effect ($)", fontsize=12)
+        ax2.set_title("Predicted vs true effect (held-out)", fontsize=14, fontweight="bold")
+        ax2.legend(loc="lower right")
+        ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        logger.info(f"Saved figure to {save_path}")
+    return fig
+
+
+def plot_refutation_summary(
+    summary: pd.DataFrame,
+    ate_estimate: float,
+    save_path: str | None = None,
+) -> Figure:
+    """
+    One row per refutation check: the re-estimated effect against what it
+    should be (zero for placebo tests, the original estimate for stability
+    tests). Green = passed, red = failed.
+
+    Args:
+        summary: ``summary`` table from ``refute.run_all_refutations``
+        ate_estimate: The headline estimate (drawn as a reference line)
+        save_path: Optional path to save figure
+
+    Returns:
+        Matplotlib Figure
+    """
+    df_plot = summary.dropna(subset=["new_effect"]).reset_index(drop=True)
+    fig, ax = plt.subplots(figsize=(11, max(4, 0.7 * len(df_plot) + 1.5)))
+    y = np.arange(len(df_plot))
+
+    ax.axvline(0, color="black", linewidth=1, label="Zero")
+    ax.axvline(ate_estimate, color="steelblue", linestyle="--", linewidth=2, label=f"Headline estimate (${ate_estimate:.2f})")
+    for i, row in df_plot.iterrows():
+        ax.plot([row["expected"], row["new_effect"]], [i, i], color="gray", alpha=0.4, linewidth=1, zorder=1)
+    ax.scatter(df_plot["expected"], y, marker="|", s=300, color="black", zorder=2, label="Expected if assumptions hold")
+    ax.scatter(
+        df_plot["new_effect"],
+        y,
+        s=120,
+        c=["seagreen" if p else "crimson" for p in df_plot["passed"]],
+        edgecolor="black",
+        zorder=3,
+        label="Re-estimated effect",
+    )
+    ax.set_yticks(y)
+    ax.set_yticklabels([f"{t}  [{s}]" for t, s in zip(df_plot["test"], df_plot["source"])])
+    ax.invert_yaxis()
+    ax.set_xlabel("Estimated effect ($)", fontsize=12)
+    ax.set_title("Refutation checks: does the estimate survive?", fontsize=14, fontweight="bold")
+    # Legend below the axes so it never covers a data point
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=4, fontsize=9, frameon=False)
+    ax.grid(True, alpha=0.3, axis="x")
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        logger.info(f"Saved figure to {save_path}")
+    return fig

@@ -16,16 +16,19 @@ Production-quality causal impact analysis for retail coupon campaigns. Estimate 
   - Covariate balance assessment (Love plots, SMD)
 
 - **Policy Learning & Uplift**
-  - Qini curves and Area Under Uplift Curve (AUUC)
-  - Budget-constrained targeting recommendations
-  - Segment-level uplift analysis
-  - ROI and net benefit evaluation
+  - CATE models fit on a training split and evaluated on a held-out split
+  - Doubly-robust policy evaluation (AIPW pseudo-outcomes), Qini curves, AUUC
+  - **Predictive response model vs causal uplift model**: the same budget, scored by
+    incremental spend, shows why "who will buy" is the wrong question
+  - Budget-constrained targeting recommendations, segment-level uplift, ROI and net benefit
 
 - **Robustness & Sensitivity**
-  - DoWhy causal graph and refutation tests
-  - Placebo tests, leave-one-out analysis
-  - Bootstrap confidence intervals
-  - Synthetic data with known ground truth
+  - Explicit causal graph; DoWhy derives the backdoor adjustment set from it
+  - DoWhy refuters (placebo treatment, random common cause, data subset)
+  - In-house checks on the headline AIPW estimate: permuted-treatment placebo,
+    effect on a pre-treatment variable, leave-one-covariate-out
+  - Cinelli & Hazlett robustness value for unobserved confounding
+  - Bootstrap confidence intervals; synthetic data with known ground truth
 
 - **Production-Ready**
   - Clean, modular Python package
@@ -88,7 +91,7 @@ See `pyproject.toml` for full dependency list with pinned versions.
 Run the complete pipeline on synthetic data:
 
 ```bash
-# Run the pipeline: data → estimation → reports (fast demo profile, ~1.5 min on 4 cores)
+# Run the pipeline: data → estimation → refutation → reports (fast demo profile, ~2 min on 4 cores)
 make all
 
 # Or step-by-step:
@@ -130,9 +133,12 @@ python -m pytest tests/test_synth_recovery.py -v
 **Test Suite:**
 - `test_synth_recovery.py` - Validates ATE/CATE recovery on synthetic data with known ground truth
 - `test_balance.py` - Tests covariate balance improvement after propensity weighting
-- `test_policy.py` - Tests policy learning and uplift evaluation (Qini, AUUC)
+- `test_policy.py` - Tests policy learning, uplift evaluation (Qini, AUUC), doubly-robust
+  policy value and the targeting-strategy comparison
+- `test_refute.py` - Tests the causal graph, DoWhy identification/refuters, placebo checks,
+  leave-one-out and the robustness value
 
-17 tests, all passing on Python 3.11-3.13 with NumPy 2.4+.
+29 tests, all passing on Python 3.11-3.13 with NumPy 2.4+.
 
 ## 📖 Usage
 
@@ -208,12 +214,17 @@ Interactive dashboard for exploring results:
 streamlit run app/streamlit_app.py
 ```
 
-Features:
-- Data source selection (synthetic / public)
-- ATE estimates with confidence intervals
-- CATE distribution and Qini curves
-- Segment analysis
-- Downloadable targeting lists
+Tabs:
+- **Overview**: data, treatment and outcome distributions
+- **ATE: naive vs causal**: estimates with confidence intervals and the size of the bias
+- **Assumptions & refutation**: the causal graph (rendered), DoWhy's backdoor set,
+  propensity overlap, Love plot, refutation table, robustness value, leave-one-out
+- **Uplift & policy**: CATE distribution, held-out Qini curve, budget slider
+- **ML vs causal targeting**: predictive response model vs causal uplift model at the
+  same budget, with doubly-robust (and true) incremental spend
+- **Validation**: all CATE models on the held-out split, calibration by decile,
+  predicted vs true effect
+- **Segments**: predicted uplift by customer segment
 
 ## 📁 Project Structure
 
@@ -234,7 +245,7 @@ retail-causal-impact/
 │   ├── cate.py               # CATE estimation (DRLearner, Causal Forest, X-Learner)
 │   ├── policy.py             # Policy learning, Qini, AUUC
 │   ├── balance.py            # Balance diagnostics (SMD, Love plots)
-│   ├── refute.py             # Refutation & sensitivity (DoWhy)
+│   ├── refute.py             # Causal graph, DoWhy refuters, placebo checks, robustness value
 │   ├── viz.py                # Visualization utilities
 │   └── utils.py              # Utilities (logging, config, seeds)
 ├── scripts/
@@ -249,7 +260,8 @@ retail-causal-impact/
 ├── tests/
 │   ├── test_synth_recovery.py  # ATE/CATE recovery on synthetic data
 │   ├── test_balance.py         # Balance improvement tests
-│   └── test_policy.py          # Policy uplift tests
+│   ├── test_policy.py          # Policy uplift, DR evaluation, targeting comparison
+│   └── test_refute.py          # Causal graph, DoWhy, placebo and sensitivity checks
 ├── reports/
 │   ├── figures/              # Generated plots
 │   └── tables/               # Generated CSVs
@@ -308,17 +320,30 @@ The synthetic data generator creates realistic confounded coupon campaign data:
    - Love plots (target: SMD < 0.1)
    - Variance ratios, positivity checks
 
-6. **Policy Evaluation**
-   - **Qini Curve**: Cumulative gain vs. fraction targeted
-   - **AUUC**: Area under uplift curve (normalized by random baseline)
-   - Budget-constrained targeting: ROI, net benefit at different budgets
-   - Segment-level uplift analysis
+6. **Held-out Policy Evaluation**
+   - Stratified 70/30 split; CATE models are fit on the training split only
+   - **Doubly-robust pseudo-outcomes** ψ on the test split (outcome models fit on
+     train): the mean of ψ over any targeted group is an unbiased estimate of that
+     group's incremental spend, so policies can be scored without the true CATE
+   - **Qini Curve** / **AUUC** on the held-out split, plus a doubly-robust uplift curve
+   - **Predictive vs causal targeting**: a gradient-boosted response model
+     (E[spend | X, coupon]) and the causal uplift model each pick their top 20%;
+     both are scored by ψ (and by the true effect on synthetic data)
+   - Calibration by decile of predicted effect; budget-constrained ROI and net benefit;
+     segment-level uplift
 
-7. **Robustness Checks**
-   - DoWhy causal graph and refutation tests
-   - Placebo outcome tests
-   - Leave-one-out covariate analysis
-   - Sensitivity to unobserved confounding
+7. **Refutation and Sensitivity**
+   - **Causal graph** (`refute.DEFAULT_CAUSAL_EDGES`): DoWhy derives the backdoor
+     adjustment set and estimates by regression adjustment
+   - **DoWhy refuters**: placebo treatment (expect ~0), random common cause and
+     80% data subset (expect no change)
+   - **In-house checks on the headline AIPW estimate**: permuted-treatment placebo,
+     IPW effect on a pre-campaign variable (`pre_trend`), leave-one-covariate-out
+   - **Robustness value** (Cinelli & Hazlett 2020): how strong an unobserved
+     confounder would have to be to explain the effect away
+
+   DoWhy's `propensity_score_weighting` estimator is deliberately not used for the
+   refuters: on this data its placebo check returns about -9 where the truth is 0.
 
 ### Key Metrics
 
@@ -380,16 +405,47 @@ heterogeneity terms).
 - **Balance**: mean standardised mean difference drops from 0.100 to 0.011 after
   weighting; the largest imbalance (high-value segment, 0.47) drops to 0.01, the largest
   remaining SMD is 0.04, and all 20 covariates are below the 0.1 threshold.
-- **CATE**: in-sample correlation with the true per-customer effect is 0.85 for the
-  Causal Forest, 0.83 for DRLearner and 0.77 for the X-Learner. Per-segment predicted
-  uplift tracks the truth closely (new customers $23.0 vs $23.5 true; low value $20.1
-  vs $19.4; mid value $11.5 vs $11.4; high value $11.5 vs $11.3).
-- **Policy**: normalised AUUC of 0.11 for Causal Forest targeting; the top 20% by
-  predicted uplift have a predicted average effect of $22.84 against a population
-  average of $15.56.
+### Held-out CATE validation (3,000 customers the models never saw)
 
-The CATE numbers above are in-sample; held-out CATE evaluation and wiring the DoWhy
-refutation tests into the pipeline are planned follow-ups.
+| Method | Corr. with true CATE | Incremental $ per customer, top 20% (doubly-robust) | Same, true effect |
+|--------|---------------------|-----------------------------------------------------|-------------------|
+| Causal Forest | 0.84 | $23.19 | $22.99 |
+| DRLearner | 0.81 | $22.90 | $22.54 |
+| X-Learner | 0.78 | $22.48 | $22.13 |
+
+Calibration by decile of predicted effect: the Causal Forest's predictions run from
+$10.1 (decile 1) to $23.4 (decile 10), the true effects from $9.6 to $23.8, and the
+doubly-robust estimates track both within their confidence intervals.
+
+### Predictive ML vs causal targeting (held-out, top 20% of customers)
+
+| Targeting rule | Incremental $ per targeted customer (doubly-robust) | True |
+|----------------|-----------------------------------------------------|------|
+| Oracle (true CATE) | $24.49 | $24.27 |
+| **Causal uplift model** (Causal Forest) | **$23.19** | **$22.99** |
+| Random | $15.41 | $15.59 |
+| Predictive response model (predict spend) | $13.83 | $12.46 |
+
+The response model targets *worse than random*: it picks loyal, high-spending customers
+who would have bought anyway. The doubly-robust scores reproduce the true values to
+within about a dollar, which is what makes this comparison usable on real data where
+the true effect is unknown.
+
+### Refutation checks (headline AIPW estimate $15.79)
+
+| Check | Source | Expected | Re-estimated | Result |
+|-------|--------|----------|--------------|--------|
+| Placebo treatment (permuted) | DoWhy | 0 | 0.07 (p = 0.40) | pass |
+| Random common cause added | DoWhy | 15.21 | 15.21 (p = 0.39) | pass |
+| Random 80% data subset | DoWhy | 15.21 | 15.22 (p = 0.45) | pass |
+| Placebo treatment (permuted), AIPW | pipeline | 0 | 0.03 ± 0.23 | pass |
+| Effect on pre-campaign trend, IPW | pipeline | 0 | 0.01 [-0.05, 0.08] | pass |
+| Drop most influential covariate (loyalty) | pipeline | 15.79 | 17.10 (+8%) | pass |
+
+DoWhy identifies `{loyalty_score, recency_days, frequency_purchases, monetary_value,
+customer_segment}` as the backdoor set from the graph. The robustness value is 0.51:
+an unobserved confounder would need to explain more than half of the remaining variance
+of both coupon assignment and spend to reduce the estimate to zero.
 
 ### Example Output
 
@@ -416,9 +472,25 @@ BALANCE DIAGNOSTICS
 Before weighting - Mean SMD: 0.100   (70% of covariates below 0.1)
 After weighting  - Mean SMD: 0.011   (100% of covariates below 0.1)
 
-POLICY EVALUATION
-=================
-Area Under Uplift Curve (AUUC, normalised): 0.110
+HELD-OUT EVALUATION (train 7,000 / test 3,000)
+==============================================
+Mean DR pseudo-outcome on test set: $16.25
+Using causal_forest for policy evaluation and targeting
+Targeting strategies at 20% budget:
+  oracle (true CATE)  dr_uplift_per_customer 24.49   true 24.27
+  uplift_model        dr_uplift_per_customer 23.19   true 22.99
+  random              dr_uplift_per_customer 15.41   true 15.59
+  response_model      dr_uplift_per_customer 13.83   true 12.46
+
+REFUTATION AND SENSITIVITY CHECKS
+=================================
+Backdoor adjustment set: ['frequency_purchases', 'customer_segment', 'monetary_value',
+                          'recency_days', 'loyalty_score']
+placebo effect 0.03 ± 0.23 (real estimate 15.79, p under placebo = 0)
+PASSED: effect on pre-treatment outcome 0.01 [-0.05, 0.08]
+Robustness value: a confounder would need partial R² ≥ 50.8% with both treatment
+and outcome to explain the effect away
+Refutation summary: 6/6 checks passed
 ```
 
 ## 🔗 References

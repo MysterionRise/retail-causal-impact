@@ -90,8 +90,13 @@ cate:
     n_estimators: 100
     max_depth: 6
 
+# Held-out evaluation: CATE models are fit on the train split and scored on the test split
+evaluation:
+  test_size: 0.3
+
 policy:
   budget_fractions: [0.1, 0.2, 0.3, 0.4, 0.5]
+  comparison_budget: 0.2   # budget used for the ML-vs-causal targeting comparison
   qini_bins: 20
   min_samples_per_bin: 30
 
@@ -99,11 +104,13 @@ balance:
   smd_threshold: 0.1
   plot_top_features: 15
 
+# Refutation / sensitivity checks (run after ATE estimation)
 refutation:
-  n_simulations: 100
-  placebo_methods:
-    - "random_common_cause"
-    - "placebo_treatment_refuter"
+  n_simulations: 20            # DoWhy refuters: simulations per test (~1 s each)
+  n_placebo_permutations: 50   # in-house placebo treatment (AIPW on permuted T)
+  placebo_outcome_column: "pre_trend"   # pre-treatment variable the coupon must not "affect"
+  placebo_outcome_bootstrap: 300
+  loo_max_pct_change: 25        # leave-one-covariate-out passes if ATE moves < this %
 
 viz:
   figure_format: "png"
