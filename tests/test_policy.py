@@ -210,3 +210,78 @@ def test_qini_curve_bounds(policy_data):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# Doubly-robust policy evaluation and targeting comparison
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def dr_data():
+    """Synthetic data with propensity, outcome models and DR pseudo-outcomes."""
+    from coupon_causal import ate
+
+    df, ground_truth = data.generate_synthetic_coupon_data(n_samples=4000, random_state=3)
+    feature_config = {
+        "categorical_features": ["customer_segment"],
+        "continuous_features": ["loyalty_score", "price_sensitivity", "monetary_value", "recency_days"],
+    }
+    X, T, Y, _ = features.prepare_features(df, feature_config, fit=True)
+    e = propensity.PropensityModel(model_type="logistic").fit(X, T).propensity_scores_
+    _, (m1, m0) = ate.estimate_ate_aipw(X, Y, T, e, model_type="linear")
+    dr = policy.compute_dr_scores(Y, T, e, m0.predict(X), m1.predict(X))
+    return X, Y, T, e, dr, df["true_treatment_effect"].values, ground_truth
+
+
+def test_dr_scores_average_to_ate(dr_data):
+    _, _, _, _, dr, _, ground_truth = dr_data
+    assert abs(dr.mean() - ground_truth["true_ate"]) / ground_truth["true_ate"] < 0.2
+
+
+def test_dr_uplift_curve_endpoints(dr_data):
+    _, _, _, _, dr, true_cate, _ = dr_data
+    fractions, gain, baseline = policy.compute_dr_uplift_curve(true_cate, dr, n_bins=10)
+
+    assert len(fractions) == len(gain) == len(baseline) == 11
+    assert gain[0] == 0 and baseline[0] == 0
+    assert np.isclose(gain[-1], dr.sum()) and np.isclose(baseline[-1], dr.sum())
+    # Targeting by the true effect should beat random at the halfway point
+    assert gain[5] > baseline[5]
+
+
+def test_targeting_strategies_ranking(dr_data):
+    X, Y, T, _, dr, true_cate, _ = dr_data
+    response = policy.fit_response_model(X, Y, T, random_state=0, n_estimators=30)
+    table = policy.evaluate_targeting_strategies(
+        {"uplift_model": true_cate + np.random.default_rng(0).normal(0, 2, len(true_cate)),
+         "response_model": response.predict(X)},
+        dr,
+        budget_fraction=0.2,
+        true_cate=true_cate,
+    )
+
+    assert set(table["strategy"]) == {"uplift_model", "response_model", "random", "oracle (true CATE)"}
+    assert (table["n_targeted"] == int(0.2 * len(dr))).all()
+    val = table.set_index("strategy")["true_uplift_per_customer"]
+    assert val["oracle (true CATE)"] >= val["uplift_model"] > val["random"]
+    assert val["uplift_model"] > val["response_model"], "Causal targeting must beat spend prediction"
+
+
+def test_calibration_by_decile(dr_data):
+    _, _, _, _, dr, true_cate, _ = dr_data
+    noisy_pred = true_cate + np.random.default_rng(1).normal(0, 2, len(true_cate))
+    cal = policy.cate_calibration_by_decile(noisy_pred, dr, true_cate, n_bins=10)
+
+    assert list(cal["decile"]) == list(range(1, 11))
+    assert cal["n"].sum() == len(dr)
+    assert cal["predicted_cate"].is_monotonic_increasing
+    assert cal["true_cate"].iloc[-1] > cal["true_cate"].iloc[0]
+
+
+def test_evaluate_policy_uplift_dr_columns(dr_data):
+    _, Y, T, _, dr, true_cate, _ = dr_data
+    table = policy.evaluate_policy_uplift(true_cate, T, Y, budget_fractions=[0.1, 0.3], dr_scores=dr)
+
+    assert {"dr_uplift_per_unit", "dr_total_uplift", "dr_net_benefit", "dr_roi"} <= set(table.columns)
+    assert np.isclose(table["dr_total_uplift"].iloc[0], table["dr_uplift_per_unit"].iloc[0] * table["n_treated"].iloc[0])
