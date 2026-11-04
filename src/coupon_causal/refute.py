@@ -570,3 +570,53 @@ def run_all_refutations(
     logger.info(f"\nRefutation summary: {n_pass}/{len(summary)} checks passed")
     logger.info(f"\n{summary.to_string(index=False)}")
     return results
+
+
+def identify_effect(
+    df: pd.DataFrame,
+    edges: list[tuple[str, str]] | None = None,
+    treatment_col: str = "treatment",
+    outcome_col: str = "outcome",
+    estimator: str = "backdoor.linear_regression",
+) -> dict:
+    """
+    Identify the adjustment set from a causal graph and estimate the effect
+    by regression adjustment, without running refuters (fast: < 1 s).
+
+    Used interactively ("what if region also drives who gets a coupon?") to
+    show how an edit to the assumed graph changes the backdoor set and the
+    estimate.
+
+    Args:
+        df: DataFrame with treatment, outcome and covariates
+        edges: Causal edges; defaults to ``DEFAULT_CAUSAL_EDGES`` filtered to ``df``
+        treatment_col: Treatment column name
+        outcome_col: Outcome column name
+        estimator: DoWhy estimator name
+
+    Returns:
+        Dict with ``graph``, ``edges``, ``backdoor_variables``, ``identified``
+        (bool) and ``estimate`` (NaN when not identified).
+    """
+    from dowhy import CausalModel
+
+    edges = edges if edges is not None else DEFAULT_CAUSAL_EDGES
+    allowed = set(df.columns) | {treatment_col, outcome_col}
+    edges = [(a, b) for a, b in edges if a in allowed and b in allowed]
+    graph = build_causal_graph(list(df.columns), edges, treatment_col, outcome_col)
+
+    model = CausalModel(data=df, treatment=treatment_col, outcome=outcome_col, graph=graph)
+    identified = model.identify_effect(proceed_when_unidentifiable=True)
+    backdoor = list(identified.get_backdoor_variables() or [])
+
+    result = {
+        "graph": graph,
+        "edges": edges,
+        "backdoor_variables": backdoor,
+        "identified": identified.estimands.get("backdoor") is not None,
+        "estimate": float("nan"),
+    }
+    if result["identified"]:
+        estimate = model.estimate_effect(identified, method_name=estimator)
+        result["estimate"] = float(estimate.value)
+    return result

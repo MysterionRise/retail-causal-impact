@@ -107,11 +107,12 @@ Two config profiles are provided: `config/default.yaml` (fast, used by `make all
 `config/full.yaml` (thorough). Both run every estimator; they differ only in bootstrap
 draws, model sizes and cross-fitting folds.
 
-### Launch Dashboard
+### Launch Dashboards
 
 ```bash
-make app
-# Opens at http://localhost:8501
+make app        # Streamlit, http://localhost:8501
+make api        # causal engine API + copilot agent, http://localhost:8000
+make web        # Next.js + CopilotKit dashboard, http://localhost:3000
 ```
 
 ### Run Tests
@@ -226,6 +227,50 @@ Tabs:
   predicted vs true effect
 - **Segments**: predicted uplift by customer segment
 
+## 🤖 Copilot (CopilotKit + AG-UI + Claude)
+
+The Streamlit app is the quick look. The real product surface is a Next.js dashboard with a
+CopilotKit sidebar whose agent answers questions by calling the causal engine as tools, so
+every number it states is computed by the pipeline code, never by the model.
+
+![CopilotKit dashboard with the causal copilot sidebar](docs/screenshots/copilot-dashboard.png)
+
+```
+browser ── Next.js (web/) ── CopilotKit runtime ── AG-UI over HTTP ── FastAPI (services/api)
+             dashboard panels + chat                                    ├─ Engine: subgroup effects, what-ifs,
+             generative-UI cards for tool calls                         │  DAG edits + DoWhy re-identification,
+             frontend tools (set budget, slider, focus panel)           │  confounding simulator, refutation
+             shared dashboard state → agent context                     └─ Agent: Claude Opus 5.5 (streaming,
+                                                                           tools, server-side refusal fallback)
+```
+
+What the copilot can do, each backed by a deterministic engine call:
+
+| Ask | Tool | What you see |
+|-----|------|--------------|
+| "Effect for new customers in the north?" | `get_subgroup_effect` | doubly-robust effect with CI, naive gap, true effect |
+| "What if coupons cost $3 at 15% budget?" | `whatif_budget` | net benefit, ROI, break-even budget; dashboard budget follows |
+| "Assume region also drives who gets a coupon" | `edit_dag` | new backdoor set, re-estimated effect, graph redrawn |
+| "Set confounding to 6" | `set_confounding_strength` (frontend) | simulator slider moves, naive drifts, AIPW holds |
+| "Why trust this?" | `get_refutation` | six checks, robustness value |
+| "Compare ML and causal targeting at 30%" | `compare_targeting` | per-strategy incremental spend, gain curves |
+
+Run it:
+
+```bash
+make all                      # pipeline artifacts the engine loads (once)
+export ANTHROPIC_API_KEY=...  # needed by the agent
+make api                      # FastAPI on :8000  (REST under /api/*, AG-UI agent at /agent)
+make web                      # Next.js on :3000  (first run: npm install)
+# or everything in containers:
+cp .env.example .env && docker compose up --build
+```
+
+The REST API is usable on its own (`/api/summary`, `/api/subgroup-effect`, `/api/whatif`,
+`/api/dag/edit`, `/api/simulate`, ...; `/api/tools` lists the agent's tool definitions).
+`services/api/tests` covers the engine, the AG-UI event stream with a fake Claude client,
+and the HTTP surface.
+
 ## 📁 Project Structure
 
 ```
@@ -256,7 +301,16 @@ retail-causal-impact/
 │   ├── 10_causal_estimation.ipynb
 │   └── 20_policy_uplift.ipynb
 ├── app/
-│   └── streamlit_app.py      # Interactive dashboard
+│   └── streamlit_app.py      # Interactive Streamlit dashboard
+├── services/api/             # FastAPI causal engine + AG-UI copilot agent (Claude)
+│   ├── engine.py             # Queries over the pipeline artifacts (subgroups, what-ifs, DAG edits, simulator)
+│   ├── tools.py              # Tool registry shared by the agent and the REST routes
+│   ├── agent.py              # AG-UI protocol over a streaming Claude tool loop
+│   └── main.py               # Routes: /api/* and POST /agent
+├── web/                      # Next.js + CopilotKit (v2) dashboard and copilot
+│   ├── app/api/copilotkit/   # CopilotKit runtime -> HttpAgent -> services/api
+│   ├── components/           # Panels, charts, DAG view, generative-UI cards
+│   └── lib/                  # API client, dashboard state
 ├── tests/
 │   ├── test_synth_recovery.py  # ATE/CATE recovery on synthetic data
 │   ├── test_balance.py         # Balance improvement tests

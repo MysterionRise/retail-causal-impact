@@ -1,5 +1,5 @@
 # path: Makefile
-.PHONY: help setup data train report full app test lint clean all
+.PHONY: help setup data train report full app api web dev test lint clean all
 
 help:
 	@echo "Coupon Causal Impact Analysis - Available Commands:"
@@ -9,6 +9,9 @@ help:
 	@echo "  make report   - Generate reports and figures"
 	@echo "  make full     - Run data → train → report with the heavy config/full.yaml profile"
 	@echo "  make app      - Launch Streamlit dashboard"
+	@echo "  make api      - Launch the FastAPI causal engine + AG-UI copilot endpoint (:8000)"
+	@echo "  make web      - Launch the Next.js + CopilotKit front end (:3000)"
+	@echo "  make dev      - Launch api and web together"
 	@echo "  make test     - Run test suite"
 	@echo "  make lint     - Run code quality checks"
 	@echo "  make clean    - Remove generated files"
@@ -46,14 +49,27 @@ app:
 	@echo "Launching Streamlit dashboard..."
 	streamlit run app/streamlit_app.py
 
+api:
+	@test -f models/estimation_results.joblib || (echo "No pipeline artifacts yet; running make all first" && $(MAKE) data train report)
+	@echo "Launching causal engine API on http://localhost:8000 ..."
+	uvicorn services.api.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir services --reload-dir src
+
+web:
+	@test -d web/node_modules || (cd web && npm install)
+	@echo "Launching CopilotKit front end on http://localhost:3000 ..."
+	cd web && npm run dev
+
+dev:
+	@$(MAKE) -j2 api web
+
 test:
 	@echo "Running test suite..."
-	pytest tests/ -v --cov=src/coupon_causal --cov-report=term-missing
+	pytest tests/ services/api/tests -v --cov=src/coupon_causal --cov=services/api --cov-report=term-missing
 	@echo "Tests complete!"
 
 lint:
 	@echo "Running code quality checks..."
-	ruff check src/ tests/ scripts/ app/
+	ruff check src/ tests/ scripts/ app/ services/
 	mypy src/coupon_causal/
 	@echo "Linting complete!"
 

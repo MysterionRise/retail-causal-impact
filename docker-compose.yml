@@ -1,0 +1,38 @@
+# path: docker-compose.yml
+# One command for the whole demo:  docker compose up --build
+#   api: FastAPI causal engine + AG-UI copilot endpoint   -> http://localhost:8000
+#   web: Next.js + CopilotKit dashboard and copilot       -> http://localhost:3000
+# Put ANTHROPIC_API_KEY in a .env file next to this compose file (see .env.example).
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
+      CAUSAL_COPILOT_FALLBACKS: ${CAUSAL_COPILOT_FALLBACKS:-1}
+      CORS_ORIGINS: http://localhost:3000,http://web:3000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_CAUSAL_API_URL: http://localhost:8000
+    environment:
+      # Server-side: the Next.js runtime route proxies the copilot to the api container
+      CAUSAL_AGENT_URL: http://api:8000/agent
+      COPILOTKIT_TELEMETRY_DISABLED: ${COPILOTKIT_TELEMETRY_DISABLED:-true}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
