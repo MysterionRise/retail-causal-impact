@@ -1,226 +1,131 @@
 # Output Interpretation Guide for Non-Experts
 
-## Overview: What This Analysis Tells You
+Every figure and number here is produced by `make all` (default profile, 10,000 synthetic customers, seed 42) and lands in `reports/figures/` and `reports/tables/`. The dollar amounts are per customer unless a total is stated.
 
-This analysis answers **3 critical business questions**:
-1. **Did the coupon campaign actually work?** (Are we measuring real impact or just correlation?)
-2. **Who benefits most from coupons?** (Which customers should we target?)
-3. **How do we optimize our budget?** (What's the ROI of different targeting strategies?)
+## The three questions the analysis answers
 
----
+1. **Did the coupon campaign actually work?** Is the measured lift real or an artefact of who was targeted?
+2. **Who benefits most from coupons?** Which customers should get the next one?
+3. **How much budget should we spend?** What is the net benefit of different targeting rules?
 
-## The 4 Key Outputs to Present
+## The four outputs to present
 
-### 📊 Page 1: "Did the Coupon Campaign Work?" - ATE Comparison
+### 1. "Did the coupons work?" · `04_ate_comparison.png`
 
-**File:** `04_ate_comparison.png`
+**What it shows.** Four estimators of the same effect with 95% intervals. The naive row is the plain treated-versus-control gap; the others adjust for who was targeted.
 
-**What it shows:** Different methods for estimating the average dollar lift from coupons.
+| Method | Estimate | 95% interval |
+|--------|----------|--------------|
+| Naive difference | $23.61 | $22.92 to $24.25 |
+| IPW | $15.71 | $15.17 to $16.22 |
+| AIPW (linear) | $15.79 | $15.40 to $16.26 |
+| AIPW (random forest) | $15.99 | $15.68 to $16.56 |
 
-**How to read it:**
-- Each row is a different statistical method
-- The dot shows the estimated impact (e.g., "$15 increase in spend")
-- The horizontal lines show the confidence interval (how uncertain we are)
-- **Naive** = simple comparison (BIASED - ignores that we targeted loyal customers)
-- **IPW** = adjusts for who got targeted (better)
-- **AIPW** = most reliable method (doubly-robust)
+The true effect in this synthetic campaign is **$15.56**.
 
-**What to tell your boss:**
-> "Our naive analysis suggested coupons generated $18.50 in lift, but that's misleading because we targeted our best customers. After correcting for selection bias using causal inference, the **true impact is $15.00** per coupon. This means our initial estimates were inflated by 23%—we were crediting the coupon for purchases that would have happened anyway."
+**What to tell your boss.**
+> "The raw comparison says a coupon adds $23.61 of spend. That is inflated because we sent coupons to our best customers, who spend more anyway. After correcting for that, the real effect is about $15.80 per coupon. We were overstating the impact by roughly 50%."
 
-**Red flags:**
-- If Naive is MUCH higher than AIPW → you were targeting customers who'd buy anyway (wasted spend)
-- If confidence intervals cross zero → campaign might not be working
+**Red flags.** A naive estimate far above the adjusted ones means the targeting was biased, as here. Intervals that cross zero mean the campaign may not be working.
 
----
+### 2. "Who responds?" · `05_cate_distribution.png` and `07_segment_uplift.png`
 
-### 📊 Page 2: "Are Customers Different?" - CATE Distribution
+**What they show.** The spread of predicted per-customer effects, and the average by segment.
 
-**File:** `05_cate_distribution.png`
+| Segment | Coupon rate | Effect (doubly-robust) | True effect |
+|---------|-------------|------------------------|-------------|
+| New customers | 15% | $22.95 | $23.46 |
+| Low value | 29% | $19.90 | $19.37 |
+| Mid value | 27% | $11.70 | $11.38 |
+| High value | 51% | $11.80 | $11.32 |
 
-**What it shows:** The predicted dollar impact of coupons varies dramatically across customers.
+**What to tell your boss.**
+> "New and low-value customers gain over $20 of spend from a coupon; high-value customers gain under $12, and they are the ones who got the most coupons. We have been spending where the effect is smallest."
 
-**How to read it:**
-- **Left chart (histogram):** Distribution of predicted lift across all customers
-- **Right chart (box plot):** Summary statistics (median, quartiles, outliers)
-- X-axis shows predicted lift in dollars (negative = customers who spend LESS with coupons!)
-- Red line shows the average
+### 3. "Who should we target?" · `08_targeting_ml_vs_causal.png`
 
-**What to tell your boss:**
-> "Not all customers respond equally to coupons. While the average lift is $15, we have customers ranging from $5 to $30+ in predicted lift. This means we're leaving money on the table by treating everyone the same. Some customers (likely already loyal) don't need coupons, while price-sensitive customers respond strongly."
+**What it shows.** Given the same budget (the top 20% of 3,000 held-out customers), four targeting rules scored by incremental spend per targeted customer. The doubly-robust column is what you could compute on real data; the true column exists only because the data is synthetic.
 
-**Key insights:**
-- **Wide spread** = big opportunity for targeting (send coupons only to high-responders)
-- **Negative values** = some customers actually spend LESS when offered coupons (they wait for deals)
-- **Narrow spread** = targeting won't help much (everyone responds similarly)
+| Targeting rule | Doubly-robust | True |
+|----------------|---------------|------|
+| Oracle (true effect) | $24.49 | $24.27 |
+| Causal uplift model | $23.19 | $22.99 |
+| Random | $15.41 | $15.59 |
+| Predictive response model | $13.83 | $12.46 |
 
----
+**What to tell your boss.**
+> "A standard predictive model picks the customers most likely to spend. Those are loyal customers who would have spent anyway, so it does worse than picking at random. Ranking by predicted uplift instead yields $23 per targeted customer, about 1.7 times the predictive model."
 
-### 📊 Page 3: "Who Should We Target?" - Qini Curve
+**Red flags.** If the causal line in the left-hand chart hugs the random diagonal, the uplift model has not found real heterogeneity and targeting will not help.
 
-**File:** `06_qini_curve.png`
+### 4. "How much should we spend?" · the budget table in `policy_results.csv` and the dashboard what-if panel
 
-**What it shows:** How much incremental revenue we get by targeting the right customers.
+**What it shows.** Net benefit of the uplift policy at increasing budget shares on the held-out set, at $1 per coupon.
 
-**How to read it:**
-- **X-axis:** % of customers we send coupons to (sorted by predicted lift)
-- **Y-axis:** Cumulative uplift (total extra dollars generated)
-- **Blue line:** Our smart targeting policy (sending to high-responders first)
-- **Gray dashed line:** Random targeting (baseline)
-- **Green shaded area:** The benefit of smart targeting vs random
+| Budget share | Coupons | Incremental spend per coupon | Net benefit |
+|--------------|---------|------------------------------|-------------|
+| 10% | 300 | $22.47 | $6,440 |
+| 20% | 600 | $23.19 | $13,312 |
+| 30% | 900 | $22.65 | $19,482 |
+| 50% | 1,500 | $20.95 | $29,926 |
 
-**What to tell your boss:**
-> "If we target the top 20% highest-responding customers, we generate $2,940 in incremental revenue. If we expanded to 30%, we'd get $4,200. The curve shows diminishing returns—beyond 40%, we're wasting coupons on people who don't respond. Our current strategy of targeting everyone is leaving $X on the table and wasting budget on low-responders."
+Across the whole base of 10,000 customers, a 20% budget at $1 per coupon returns about $49,300 of incremental spend for $2,000 of coupons. At $1 the predicted effect never falls below the coupon cost, so the break-even share is 100%; raise the cost (the dashboard input, or ask the copilot "what if coupons cost $5") to find the point where marginal customers stop paying for themselves.
 
-**Decision points:**
-- **Steep curve at start** = target only high-responders (top 10-20%)
-- **Linear (matches gray line)** = targeting doesn't help, save money by limiting coupons
-- **AUUC score** = area between blue and gray (higher = better targeting performance)
+## Supporting outputs: can we trust this?
 
----
+### `03_love_plot.png` · balance
 
-### 📊 Page 4: "Which Segments Respond Best?" - Segment Uplift
+Each row is a customer characteristic. Orange is the imbalance between treated and control before weighting, blue after. The mean standardized mean difference drops from 0.100 to 0.011 and all 20 covariates end up below the 0.1 line. Treated and control customers are now comparable on everything we measured.
 
-**File:** `07_segment_uplift.png`
+### `02_propensity_distribution.png` · overlap
 
-**What it shows:** Average predicted lift by customer segment (e.g., high-value, new customers, etc.).
+Treated and control customers must overlap in their probability of receiving a coupon. They do: no customer sits at the extremes, so every customer has a plausible counterpart in the other group.
 
-**How to read it:**
-- Each bar represents a customer segment
-- Bar length = average predicted lift in dollars
-- Coral (positive) = segments that respond well to coupons
-- Blue (negative) = segments that don't respond or respond negatively
+### `09_cate_validation.png` · held-out calibration
 
-**What to tell your boss:**
-> "New customers show the biggest lift ($25) from coupons—they're price-shopping and coupons convert them. Low-value customers also respond well ($18). But high-value customers only show $8 lift—they were going to buy anyway. We should stop wasting coupons on our most loyal customers and redirect budget to acquisition and reactivation."
+Customers are binned by predicted effect. Predicted (blue), doubly-robust (orange with intervals) and true (black) effects rise together from about $10 in the lowest decile to about $23 in the highest. The Causal Forest's predictions correlate 0.84 with the true per-customer effect on customers it never saw during fitting.
 
-**Actionable insights:**
-- **Highest bars** = prioritize these segments for coupon campaigns
-- **Negative bars** = STOP sending coupons to these segments (they hurt sales)
-- **Surprising segments** = challenge assumptions (e.g., "loyal customers don't need discounts")
+### `10_refutation_checks.png` · refutation
 
----
+Six checks that should either land on zero (placebo tests) or stay at the original estimate (stability tests). All six pass.
 
-## Supporting Outputs (For Technical Validation)
+| Check | Expected | Re-estimated |
+|-------|----------|--------------|
+| Placebo treatment, DoWhy | $0 | $0.07 |
+| Random common cause added, DoWhy | $15.21 | $15.21 |
+| Random 80% subset, DoWhy | $15.21 | $15.22 |
+| Placebo treatment on the AIPW estimate | $0 | $0.03 ± $0.23 |
+| Effect on a pre-campaign variable | $0 | $0.01, interval covers zero |
+| Drop the most influential covariate (loyalty) | $15.79 | $17.10 |
 
-### 📊 Page A: "Can We Trust This Analysis?" - Love Plot
+The robustness value is 0.51: an unobserved confounder would need to explain more than half of the remaining variance of both coupon assignment and spend to reduce the estimate to zero.
 
-**File:** `03_love_plot.png`
+**What to tell your boss.**
+> "We tried to break the result six ways and could not. A fake coupon shows no effect, the estimate does not move when we add noise or drop part of the data, and it would take an unmeasured factor stronger than loyalty itself to explain it away."
 
-**What it shows:** Whether we successfully corrected for selection bias.
+## A 10-minute presentation
 
-**How to read it:**
-- Each row is a customer characteristic (age, loyalty score, etc.)
-- **Coral circles:** How imbalanced groups were BEFORE correction
-- **Blue squares:** How balanced groups are AFTER correction
-- **Red dashed lines:** "Good enough" threshold (SMD < 0.1)
-- Lines connecting circles to squares show improvement
+1. **The bottom line** (`04_ate_comparison.png`): "Coupons add about $15.80 per customer, not the $23.61 the raw numbers suggest. We were overstating the effect by about half."
+2. **The opportunity** (`08_targeting_ml_vs_causal.png`): "Targeting by predicted uplift returns $23 per targeted customer. Our spend-prediction model returns $14, less than random."
+3. **Who to target** (`07_segment_uplift.png`): "New and low-value customers respond at over $20; high-value customers at under $12, and they currently receive half the coupons."
+4. **Why trust it** (`10_refutation_checks.png`): "Six refutation checks pass. It would take an unmeasured factor explaining more than half the remaining variance to overturn the result."
+5. **Next step**: pilot uplift-based targeting against the current rule in an A/B test and compare incremental spend per coupon.
 
-**What to tell your boss:**
-> "This validates our methodology. Initially, treated customers had way higher loyalty scores than control (that's the bias). After applying statistical corrections, the groups are now comparable (all blue squares inside red lines). This means our $15 estimate is trustworthy—we're comparing apples to apples."
+## Common questions
 
-**Red flags:**
-- Blue squares still outside red lines = model didn't fix bias (estimates may be wrong)
-- All coral circles inside lines = there was no bias to begin with (simpler methods OK)
+**Why not just compare treated and control?** Because coupons were not assigned at random. Loyal customers both got more coupons and spent more, so the comparison mixes the coupon's effect with the customers' loyalty. The adjusted estimators separate the two.
 
----
+**How confident are the numbers?** The intervals in the first table come from a bootstrap. On this synthetic campaign the adjusted estimates sit within about $0.40 of the truth, and the policy estimates sit within about a dollar of the true targeting value.
 
-### 📊 Page B: "Were the Right People Targeted?" - Propensity Distribution
+**Can I trust individual customer predictions?** The ranking is what matters and it is validated out of sample. Treat an individual prediction as a score, not a measurement.
 
-**File:** `02_propensity_distribution.png`
+**What can go wrong on real data?** A factor that drives both targeting and spend but is not in the data would bias the estimate; the robustness value says how strong it would have to be. Effects can shift over time or across markets, so re-estimate per campaign. The analysis assumes customers do not influence each other's response.
 
-**What it shows:** Who got coupons and whether there's overlap between treated/control groups.
+## Glossary
 
-**How to read it:**
-- **Left chart:** Histogram showing probability of being targeted
-- Coral = customers who got coupons
-- Blue = customers who didn't
-- **Right chart:** Density plot with "common support" region (red lines)
-
-**What to tell your boss:**
-> "This shows our targeting wasn't random—we heavily targeted certain customers (coral bars on the right). But critically, there's enough overlap (customers in the middle) to make valid comparisons. If there was no overlap, our analysis would be unreliable."
-
-**Red flags:**
-- No overlap (coral and blue completely separated) = can't make valid comparisons
-- Perfect overlap (identical distributions) = targeting was random (no bias problem)
-
----
-
-## What to Show in a 10-Minute Executive Presentation
-
-### Slide 1: The Bottom Line
-- **Title:** "Coupons Generate $15 True Lift (Not $18.50)"
-- **Visual:** Page 1 (ATE Comparison)
-- **Message:** "We were overestimating ROI by 23% because we targeted loyal customers"
-
-### Slide 2: The Opportunity
-- **Title:** "Smart Targeting Could Save $X or Generate +30% More Revenue"
-- **Visual:** Page 3 (Qini Curve)
-- **Message:** "Target top 20% of responders instead of everyone"
-
-### Slide 3: Who to Target
-- **Title:** "Stop Wasting Coupons on Loyal Customers"
-- **Visual:** Page 4 (Segment Uplift)
-- **Message:** "New customers: $25 lift. High-value customers: $8 lift. Redirect budget accordingly."
-
-### Slide 4: Recommended Action
-- **Title:** "Next Steps: Pilot Smart Targeting"
-- **Content:**
-  - Deploy model to score customers
-  - Run A/B test: smart targeting vs current approach
-  - Expected ROI improvement: X%
-
----
-
-## Common Questions from Non-Experts
-
-### "Why is this better than just comparing treated vs control?"
-Because we didn't randomly assign coupons—we targeted our best customers. Simple comparison confuses correlation (loyal customers buy more) with causation (coupons make people buy more). Causal inference separates the two.
-
-### "How confident are you in these numbers?"
-The confidence intervals (error bars on Page 1) quantify uncertainty. A tight interval means high confidence. We also validated the method on synthetic data with known truth—it recovered the true effect within 1%.
-
-### "Can I trust the customer-level predictions (CATE)?"
-Individual predictions have uncertainty, but ranking is reliable. Think of it like a credit score—the exact number is fuzzy, but we can confidently say who's high-risk vs low-risk.
-
-### "What if we already target everyone randomly?"
-Then the "Naive" and "AIPW" estimates will match (no bias). But you'll still benefit from CATE analysis—it tells you WHO responds best, enabling budget optimization.
-
-### "What's the catch? What can go wrong?"
-1. **Unobserved confounders:** If important factors (not in our data) affect both targeting and spending, estimates could be biased
-2. **Changing behavior:** Effects may not hold if customer behavior shifts or we target different populations
-3. **Spillover effects:** Assumes customers don't influence each other (usually OK for digital coupons)
-
-### "How do I use this in production?"
-1. Score new customers using the trained model
-2. Rank by predicted CATE (lift)
-3. Send coupons to top X% based on budget
-4. Run periodic A/B tests to validate and recalibrate
-
----
-
-## Quick Reference: Which Plot Answers Which Question?
-
-| Business Question | Plot to Show | File |
-|-------------------|-------------|------|
-| Did coupons work? | ATE Comparison | `04_ate_comparison.png` |
-| How much did they work? | ATE Comparison | `04_ate_comparison.png` |
-| Do customers differ? | CATE Distribution | `05_cate_distribution.png` |
-| Who should I target? | Qini Curve | `06_qini_curve.png` |
-| What's the ROI of smart targeting? | Qini Curve | `06_qini_curve.png` |
-| Which segments to prioritize? | Segment Uplift | `07_segment_uplift.png` |
-| Can I trust this? | Love Plot | `03_love_plot.png` |
-| Was targeting biased? | Propensity Distribution | `02_propensity_distribution.png` |
-
----
-
-## Appendix: Technical Metrics Explained
-
-- **ATE (Average Treatment Effect):** Average dollar lift across all customers
-- **CATE (Conditional ATE):** Predicted lift for individual customers based on their characteristics
-- **AUUC (Area Under Uplift Curve):** Score from 0-1 measuring targeting performance (higher = better)
-- **SMD (Standardized Mean Difference):** Measure of imbalance between groups (target < 0.1)
-- **Propensity Score:** Probability a customer was targeted based on their characteristics
-- **IPW (Inverse Propensity Weighting):** Statistical method to correct for biased targeting
-- **AIPW (Augmented IPW):** Doubly-robust method that combines outcome models and propensity weighting
-
+- **ATE**: average effect of a coupon across all customers.
+- **CATE**: predicted effect for one customer given their characteristics.
+- **Doubly-robust (AIPW)**: an estimator that combines a model of who gets coupons with a model of spend and stays consistent if either one is right.
+- **SMD**: imbalance between groups on one characteristic; under 0.1 is balanced.
+- **Backdoor set**: the variables that must be adjusted for, derived from the causal graph.
+- **Robustness value**: how strong an unmeasured confounder would have to be to explain the effect away.
